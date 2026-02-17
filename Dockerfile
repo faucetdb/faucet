@@ -1,0 +1,30 @@
+# Stage 1: Build UI
+FROM node:22-alpine AS ui-builder
+WORKDIR /app/ui
+COPY ui/package*.json ./
+RUN npm ci
+COPY ui/ ./
+RUN npm run build
+
+# Stage 2: Build Go binary
+FROM golang:1.24-alpine AS go-builder
+RUN apk add --no-cache git
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=ui-builder /app/ui/dist ./internal/ui/dist
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w -X main.version=$(git describe --tags --always 2>/dev/null || echo dev)" \
+    -o /faucet ./cmd/faucet
+
+# Stage 3: Final image (scratch for minimal size)
+FROM scratch
+COPY --from=go-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=go-builder /faucet /faucet
+
+EXPOSE 8080
+VOLUME /data
+
+ENTRYPOINT ["/faucet"]
+CMD ["serve", "--host", "0.0.0.0"]

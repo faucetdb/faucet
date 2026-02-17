@@ -1,0 +1,52 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+faucet
+
+# Go
+vendor/
+*.test
+*.out
+coverage.out
+coverage.html
+
+# UI build output (generated)
+internal/ui/dist/
+
+# UI dependencies
+ui/node_modules/
+
+# Config/data
+*.db
+*.db-journal
+*.db-wal
+faucet.yaml
+!examples/faucet.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.*
+
+# GoReleaser
+dist/
+
+# Benchmark results (keep template)
+benchmarks/results/*.json
+!benchmarks/results/.gitkeep
+
+# Temporary
+tmp/
+*.tmp
+*.log

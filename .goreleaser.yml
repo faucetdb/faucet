@@ -1,0 +1,68 @@
+version: 2
+project_name: faucet
+
+before:
+  hooks:
+    - go mod tidy
+    - cd ui && npm ci && npm run build
+
+builds:
+  - id: faucet
+    main: ./cmd/faucet
+    binary: faucet
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+brews:
+  - name: faucet
+    repository:
+      owner: faucetdb
+      name: homebrew-tap
+    homepage: "https://github.com/faucetdb/faucet"
+    description: "Turn any database into a secure REST API. One binary. One command."
+    license: "MIT"
+    install: |
+      bin.install "faucet"
+
+dockers:
+  - image_templates:
+      - "faucetdb/faucet:{{ .Version }}"
+      - "faucetdb/faucet:latest"
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--pull"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
