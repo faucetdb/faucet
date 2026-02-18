@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  faucet:
+    image: faucetdb/faucet:latest
+    container_name: faucet
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      FAUCET_PG_HOST: postgres
+      FAUCET_PG_PORT: "5432"
+      FAUCET_PG_USER: faucet
+      FAUCET_PG_PASSWORD: faucet
+      FAUCET_PG_DATABASE: demo
+    volumes:
+      - faucet_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16
+    container_name: faucet-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: demo
+      POSTGRES_USER: faucet
+      POSTGRES_PASSWORD: faucet
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U faucet -d demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  faucet_data:
+  postgres_data:

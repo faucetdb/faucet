@@ -5,7 +5,7 @@ bin/
 *.dll
 *.so
 *.dylib
-faucet
+/faucet
 
 # Go
 vendor/
