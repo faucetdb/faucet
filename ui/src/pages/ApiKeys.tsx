@@ -7,13 +7,13 @@ import { apiFetch } from '../hooks/useApi';
 
 interface ApiKey {
   id: string;
-  name: string;
-  prefix: string;
+  label: string;
+  key_prefix: string;
   role_id: string;
   role_name: string;
   is_active: boolean;
   created_at: string;
-  last_used_at: string | null;
+  last_used: string | null;
   expires_at: string | null;
 }
 
@@ -35,6 +35,10 @@ export function ApiKeys() {
   useEffect(() => {
     loadKeys();
     loadRoles();
+
+    // Poll every 30s so last_used timestamps stay current.
+    const id = setInterval(loadKeys, 30_000);
+    return () => clearInterval(id);
   }, []);
 
   async function loadKeys() {
@@ -69,15 +73,17 @@ export function ApiKeys() {
     setError(null);
     try {
       const body: Record<string, any> = {
-        name: form.name,
-        role_id: form.role_id,
+        label: form.name,
+        role_id: parseInt(form.role_id, 10),
       };
       if (form.expires_in_days > 0) {
-        body.expires_in_days = form.expires_in_days;
+        const d = new Date();
+        d.setDate(d.getDate() + form.expires_in_days);
+        body.expires_at = d.toISOString();
       }
       const res = await apiFetch('/api/v1/system/api-key', { method: 'POST', body });
       setShowModal(false);
-      setNewKey(res.key);
+      setNewKey(res.api_key);
       setShowKeyModal(true);
       loadKeys();
     } catch (err) {
@@ -123,12 +129,12 @@ export function ApiKeys() {
 
   const columns: Column<ApiKey>[] = [
     {
-      key: 'name',
+      key: 'label',
       header: 'Name',
       render: (k) => (
         <div>
-          <span class="font-semibold text-text-primary">{k.name}</span>
-          <span class="text-xs text-text-muted ml-2 font-mono">{k.prefix}...</span>
+          <span class="font-semibold text-text-primary">{k.label}</span>
+          <span class="text-xs text-text-muted ml-2 font-mono">{k.key_prefix}...</span>
         </div>
       ),
     },
@@ -145,10 +151,10 @@ export function ApiKeys() {
       render: (k) => <StatusBadge status={k.is_active ? 'active' : 'inactive'} />,
     },
     {
-      key: 'last_used_at',
+      key: 'last_used',
       header: 'Last Used',
       render: (k) => (
-        <span class="text-sm text-text-secondary">{timeAgo(k.last_used_at)}</span>
+        <span class="text-sm text-text-secondary">{timeAgo(k.last_used)}</span>
       ),
     },
     {
@@ -164,7 +170,7 @@ export function ApiKeys() {
       width: '80px',
       render: (k) => (
         <button
-          onClick={(e) => { e.stopPropagation(); handleRevoke(k.id, k.name); }}
+          onClick={(e) => { e.stopPropagation(); handleRevoke(k.id, k.label); }}
           class="btn-danger text-xs py-1 px-3"
         >
           Revoke

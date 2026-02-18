@@ -4,31 +4,69 @@ import { Table, Column } from '../components/Table';
 import { StatusBadge } from '../components/StatusBadge';
 import { apiFetch } from '../hooks/useApi';
 
+// Verb mask constants matching the Go backend.
+const VerbGet = 1;
+const VerbPost = 2;
+const VerbPut = 4;
+const VerbPatch = 8;
+const VerbDelete = 16;
+
+interface RoleAccess {
+  service_name: string;
+  component: string;
+  verb_mask: number;
+}
+
 interface Role {
   id: string;
   name: string;
   description: string;
   is_active: boolean;
-  permissions: Permission[];
+  access: RoleAccess[];
   created_at: string;
   updated_at: string;
 }
 
-interface Permission {
-  service: string;
-  table: string;
+// Form-level representation with individual verb booleans for the UI.
+interface AccessForm {
+  service_name: string;
+  component: string;
   allow_get: boolean;
   allow_post: boolean;
   allow_put: boolean;
   allow_patch: boolean;
   allow_delete: boolean;
-  filters?: string;
-  fields?: string;
 }
 
-const emptyPermission: Permission = {
-  service: '*',
-  table: '*',
+function accessToForm(a: RoleAccess): AccessForm {
+  return {
+    service_name: a.service_name,
+    component: a.component,
+    allow_get: (a.verb_mask & VerbGet) !== 0,
+    allow_post: (a.verb_mask & VerbPost) !== 0,
+    allow_put: (a.verb_mask & VerbPut) !== 0,
+    allow_patch: (a.verb_mask & VerbPatch) !== 0,
+    allow_delete: (a.verb_mask & VerbDelete) !== 0,
+  };
+}
+
+function formToAccess(f: AccessForm): RoleAccess {
+  let mask = 0;
+  if (f.allow_get) mask |= VerbGet;
+  if (f.allow_post) mask |= VerbPost;
+  if (f.allow_put) mask |= VerbPut;
+  if (f.allow_patch) mask |= VerbPatch;
+  if (f.allow_delete) mask |= VerbDelete;
+  return {
+    service_name: f.service_name,
+    component: f.component,
+    verb_mask: mask,
+  };
+}
+
+const emptyAccess: AccessForm = {
+  service_name: '*',
+  component: '*',
   allow_get: true,
   allow_post: false,
   allow_put: false,
@@ -45,7 +83,7 @@ export function Roles() {
     name: '',
     description: '',
     is_active: true,
-    permissions: [{ ...emptyPermission }] as Permission[],
+    access: [{ ...emptyAccess }] as AccessForm[],
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +109,7 @@ export function Roles() {
       name: '',
       description: '',
       is_active: true,
-      permissions: [{ ...emptyPermission }],
+      access: [{ ...emptyAccess }],
     });
     setEditId(null);
     setError(null);
@@ -79,11 +117,14 @@ export function Roles() {
   }
 
   function openEdit(role: Role) {
+    const accessForms = role.access && role.access.length > 0
+      ? role.access.map(accessToForm)
+      : [{ ...emptyAccess }];
     setForm({
       name: role.name,
       description: role.description,
       is_active: role.is_active,
-      permissions: role.permissions.length > 0 ? role.permissions : [{ ...emptyPermission }],
+      access: accessForms,
     });
     setEditId(role.id);
     setError(null);
@@ -94,10 +135,16 @@ export function Roles() {
     setSaving(true);
     setError(null);
     try {
+      const body = {
+        name: form.name,
+        description: form.description,
+        is_active: form.is_active,
+        access: form.access.map(formToAccess),
+      };
       if (editId) {
-        await apiFetch(`/api/v1/system/role/${editId}`, { method: 'PUT', body: form });
+        await apiFetch(`/api/v1/system/role/${editId}`, { method: 'PUT', body });
       } else {
-        await apiFetch('/api/v1/system/role', { method: 'POST', body: form });
+        await apiFetch('/api/v1/system/role', { method: 'POST', body });
       }
       setShowModal(false);
       loadRoles();
@@ -118,24 +165,24 @@ export function Roles() {
     }
   }
 
-  function addPermission() {
+  function addAccess() {
     setForm({
       ...form,
-      permissions: [...form.permissions, { ...emptyPermission }],
+      access: [...form.access, { ...emptyAccess }],
     });
   }
 
-  function removePermission(idx: number) {
+  function removeAccess(idx: number) {
     setForm({
       ...form,
-      permissions: form.permissions.filter((_, i) => i !== idx),
+      access: form.access.filter((_, i) => i !== idx),
     });
   }
 
-  function updatePermission(idx: number, field: keyof Permission, value: any) {
-    const updated = [...form.permissions];
+  function updateAccess(idx: number, field: keyof AccessForm, value: any) {
+    const updated = [...form.access];
     (updated[idx] as any)[field] = value;
-    setForm({ ...form, permissions: updated });
+    setForm({ ...form, access: updated });
   }
 
   const columns: Column<Role>[] = [
@@ -154,11 +201,11 @@ export function Roles() {
       ),
     },
     {
-      key: 'permissions',
-      header: 'Permissions',
+      key: 'access',
+      header: 'Access Rules',
       render: (role) => (
         <span class="font-mono text-xs text-text-secondary">
-          {role.permissions?.length || 0} rule{role.permissions?.length !== 1 ? 's' : ''}
+          {role.access?.length || 0} rule{role.access?.length !== 1 ? 's' : ''}
         </span>
       ),
     },
@@ -273,23 +320,23 @@ export function Roles() {
             </div>
           </div>
 
-          {/* Permissions */}
+          {/* Access Rules */}
           <div>
             <div class="flex items-center justify-between mb-3">
-              <label class="text-sm font-medium text-text-secondary">Permissions</label>
-              <button onClick={addPermission} class="btn-ghost text-xs py-1">
+              <label class="text-sm font-medium text-text-secondary">Access Rules</label>
+              <button onClick={addAccess} class="btn-ghost text-xs py-1">
                 + Add Rule
               </button>
             </div>
 
             <div class="space-y-3">
-              {form.permissions.map((perm, idx) => (
+              {form.access.map((rule, idx) => (
                 <div key={idx} class="p-4 rounded-lg bg-surface border border-border-subtle">
                   <div class="flex items-center justify-between mb-3">
                     <span class="text-xs font-medium text-text-muted">Rule {idx + 1}</span>
-                    {form.permissions.length > 1 && (
+                    {form.access.length > 1 && (
                       <button
-                        onClick={() => removePermission(idx)}
+                        onClick={() => removeAccess(idx)}
                         class="text-xs text-error hover:text-error/80"
                       >
                         Remove
@@ -304,31 +351,31 @@ export function Roles() {
                         type="text"
                         class="input w-full text-sm font-mono"
                         placeholder="* (all)"
-                        value={perm.service}
-                        onInput={(e) => updatePermission(idx, 'service', (e.target as HTMLInputElement).value)}
+                        value={rule.service_name}
+                        onInput={(e) => updateAccess(idx, 'service_name', (e.target as HTMLInputElement).value)}
                       />
                     </div>
                     <div>
-                      <label class="block text-xs text-text-muted mb-1">Table</label>
+                      <label class="block text-xs text-text-muted mb-1">Component</label>
                       <input
                         type="text"
                         class="input w-full text-sm font-mono"
                         placeholder="* (all)"
-                        value={perm.table}
-                        onInput={(e) => updatePermission(idx, 'table', (e.target as HTMLInputElement).value)}
+                        value={rule.component}
+                        onInput={(e) => updateAccess(idx, 'component', (e.target as HTMLInputElement).value)}
                       />
                     </div>
                   </div>
 
                   <div class="flex flex-wrap gap-3">
                     {(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const).map((m) => {
-                      const key = `allow_${m.toLowerCase()}` as keyof Permission;
+                      const key = `allow_${m.toLowerCase()}` as keyof AccessForm;
                       return (
                         <label key={m} class="flex items-center gap-1.5 text-xs cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={perm[key] as boolean}
-                            onChange={(e) => updatePermission(idx, key, (e.target as HTMLInputElement).checked)}
+                            checked={rule[key] as boolean}
+                            onChange={(e) => updateAccess(idx, key, (e.target as HTMLInputElement).checked)}
                             class="rounded border-border-default bg-surface text-brand focus:ring-brand/50"
                           />
                           <span class="text-text-secondary font-mono">{m}</span>

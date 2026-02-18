@@ -624,9 +624,18 @@ func (h *SystemHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build a role ID → name lookup so the UI can display role names.
+	roles, _ := h.store.ListRoles(r.Context())
+	roleNames := make(map[int64]string, len(roles))
+	for _, role := range roles {
+		roleNames[role.ID] = role.Name
+	}
+
 	resources := make([]map[string]interface{}, 0, len(keys))
 	for i := range keys {
-		resources = append(resources, apiKeyToMap(&keys[i]))
+		m := apiKeyToMap(&keys[i])
+		m["role_name"] = roleNames[keys[i].RoleID]
+		resources = append(resources, m)
 	}
 
 	writeJSON(w, http.StatusOK, model.ListResponse{
