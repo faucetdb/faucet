@@ -14,8 +14,9 @@ vendor/
 coverage.out
 coverage.html
 
-# UI build output (generated)
-internal/ui/dist/
+# UI build output (generated, keep .gitkeep for go:embed)
+internal/ui/dist/*
+!internal/ui/dist/.gitkeep
 
 # UI dependencies
 ui/node_modules/
