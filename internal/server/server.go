@@ -136,6 +136,9 @@ func (s *Server) setupRouter() {
 				r.Get("/api-key", sysHandler.ListAPIKeys)
 				r.Post("/api-key", sysHandler.CreateAPIKey)
 				r.Delete("/api-key/{keyId}", sysHandler.RevokeAPIKey)
+
+				// MCP configuration info
+				r.Get("/mcp", sysHandler.MCPInfo)
 			})
 		})
 
@@ -207,6 +210,7 @@ func (s *Server) setupRouter() {
 			r.Get("/roles", spaHandler)
 			r.Get("/api-keys", spaHandler)
 			r.Get("/settings", spaHandler)
+			r.Get("/mcp", spaHandler)
 			// Root serves the SPA
 			r.Get("/", spaHandler)
 		}

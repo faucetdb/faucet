@@ -1154,3 +1154,167 @@ func TestInvalidJSONBody(t *testing.T) {
 	rr := env.do(t, "POST", "/api/v1/system/admin/session", body, nil)
 	assertStatus(t, rr, http.StatusBadRequest)
 }
+
+// ---------------------------------------------------------------------------
+// MCP info endpoint tests
+// ---------------------------------------------------------------------------
+
+func TestMCPInfo(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t)
+	token := env.adminToken(t)
+
+	rr := env.doAuth(t, "GET", "/api/v1/system/mcp", nil, token)
+	assertStatus(t, rr, http.StatusOK)
+	assertContentType(t, rr, "application/json")
+
+	var resp map[string]interface{}
+	decodeJSON(t, rr, &resp)
+
+	// Verify top-level fields
+	if resp["server_name"] != "Faucet Database API" {
+		t.Errorf("server_name = %v, want Faucet Database API", resp["server_name"])
+	}
+	if resp["server_version"] != "0.1.0" {
+		t.Errorf("server_version = %v, want 0.1.0", resp["server_version"])
+	}
+
+	// Verify transports
+	transports, ok := resp["transports"].([]interface{})
+	if !ok {
+		t.Fatal("expected transports to be an array")
+	}
+	if len(transports) != 2 {
+		t.Errorf("transports count = %d, want 2", len(transports))
+	}
+
+	// Verify tools
+	tools, ok := resp["tools"].([]interface{})
+	if !ok {
+		t.Fatal("expected tools to be an array")
+	}
+	if len(tools) < 8 {
+		t.Errorf("tools count = %d, want >= 8", len(tools))
+	}
+
+	// Verify resources
+	resources, ok := resp["resources"].([]interface{})
+	if !ok {
+		t.Fatal("expected resources to be an array")
+	}
+	if len(resources) != 2 {
+		t.Errorf("resources count = %d, want 2", len(resources))
+	}
+
+	// Verify services is an array (empty since no services configured)
+	services, ok := resp["services"].([]interface{})
+	if !ok {
+		t.Fatal("expected services to be an array")
+	}
+	if len(services) != 0 {
+		t.Errorf("services count = %d, want 0 (no services configured)", len(services))
+	}
+}
+
+func TestMCPInfo_Unauthenticated(t *testing.T) {
+	env := newTestEnv(t)
+
+	rr := env.do(t, "GET", "/api/v1/system/mcp", nil, nil)
+	assertStatus(t, rr, http.StatusUnauthorized)
+}
+
+func TestMCPInfo_WithServices(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t)
+	token := env.adminToken(t)
+
+	// Create a service
+	svcBody := jsonBody(t, map[string]interface{}{
+		"name":   "testpg",
+		"label":  "Test PG",
+		"driver": "postgres",
+		"dsn":    "postgres://localhost/test",
+	})
+	rr := env.doAuth(t, "POST", "/api/v1/system/service", svcBody, token)
+	assertStatus(t, rr, http.StatusCreated)
+
+	// Get MCP info — should now include the service
+	rr = env.doAuth(t, "GET", "/api/v1/system/mcp", nil, token)
+	assertStatus(t, rr, http.StatusOK)
+
+	var resp map[string]interface{}
+	decodeJSON(t, rr, &resp)
+
+	services, ok := resp["services"].([]interface{})
+	if !ok {
+		t.Fatal("expected services to be an array")
+	}
+	if len(services) != 1 {
+		t.Fatalf("services count = %d, want 1", len(services))
+	}
+
+	svc, ok := services[0].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected service to be an object")
+	}
+	if svc["name"] != "testpg" {
+		t.Errorf("service name = %v, want testpg", svc["name"])
+	}
+	if svc["driver"] != "postgres" {
+		t.Errorf("service driver = %v, want postgres", svc["driver"])
+	}
+}
+
+func TestMCPInfo_ToolStructure(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t)
+	token := env.adminToken(t)
+
+	rr := env.doAuth(t, "GET", "/api/v1/system/mcp", nil, token)
+	assertStatus(t, rr, http.StatusOK)
+
+	var resp map[string]interface{}
+	decodeJSON(t, rr, &resp)
+
+	tools := resp["tools"].([]interface{})
+
+	// Check that each tool has the expected fields
+	for i, raw := range tools {
+		tool, ok := raw.(map[string]interface{})
+		if !ok {
+			t.Fatalf("tool[%d] is not an object", i)
+		}
+		if _, ok := tool["name"].(string); !ok {
+			t.Errorf("tool[%d].name is not a string", i)
+		}
+		if _, ok := tool["description"].(string); !ok {
+			t.Errorf("tool[%d].description is not a string", i)
+		}
+		if _, ok := tool["read_only"].(bool); !ok {
+			t.Errorf("tool[%d].read_only is not a bool", i)
+		}
+	}
+
+	// Verify specific tools exist
+	toolNames := make(map[string]bool)
+	for _, raw := range tools {
+		tool := raw.(map[string]interface{})
+		toolNames[tool["name"].(string)] = true
+	}
+
+	expectedTools := []string{
+		"faucet_list_services",
+		"faucet_list_tables",
+		"faucet_describe_table",
+		"faucet_query",
+		"faucet_insert",
+		"faucet_update",
+		"faucet_delete",
+		"faucet_raw_sql",
+	}
+	for _, name := range expectedTools {
+		if !toolNames[name] {
+			t.Errorf("missing expected tool: %s", name)
+		}
+	}
+}

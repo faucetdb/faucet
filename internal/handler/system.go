@@ -750,6 +750,64 @@ func (h *SystemHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
+// MCP configuration info
+// ---------------------------------------------------------------------------
+
+// MCPInfo returns the MCP server configuration and connection instructions.
+// GET /api/v1/system/mcp
+func (h *SystemHandler) MCPInfo(w http.ResponseWriter, r *http.Request) {
+	// Gather available services to show which databases are exposed via MCP.
+	services, _ := h.store.ListServices(r.Context())
+	activeServices := make([]map[string]interface{}, 0)
+	for _, svc := range services {
+		if svc.IsActive {
+			activeServices = append(activeServices, map[string]interface{}{
+				"name":            svc.Name,
+				"driver":          svc.Driver,
+				"read_only":       svc.ReadOnly,
+				"raw_sql_allowed": svc.RawSQL,
+			})
+		}
+	}
+
+	tools := []map[string]interface{}{
+		{"name": "faucet_list_services", "description": "List all configured database services", "read_only": true},
+		{"name": "faucet_list_tables", "description": "List tables in a service with row counts", "read_only": true},
+		{"name": "faucet_describe_table", "description": "Get detailed schema for a table", "read_only": true},
+		{"name": "faucet_query", "description": "Query records with filtering, ordering, pagination", "read_only": true},
+		{"name": "faucet_insert", "description": "Insert records into a table", "read_only": false},
+		{"name": "faucet_update", "description": "Update records matching a filter", "read_only": false},
+		{"name": "faucet_delete", "description": "Delete records matching a filter", "read_only": false},
+		{"name": "faucet_raw_sql", "description": "Execute raw SQL (if enabled on service)", "read_only": true},
+	}
+
+	resources := []map[string]interface{}{
+		{"uri": "faucet://services", "description": "JSON list of all configured services"},
+		{"uri": "faucet://schema/{service}", "description": "Full schema for a database service"},
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"server_name":    "Faucet Database API",
+		"server_version": "0.1.0",
+		"transports": []map[string]interface{}{
+			{
+				"type":        "stdio",
+				"description": "Stdio transport for Claude Desktop, Claude Code, and other MCP clients",
+				"command":     "faucet mcp",
+			},
+			{
+				"type":        "http",
+				"description": "Streamable HTTP transport for remote MCP clients",
+				"command":     "faucet mcp --transport http --port 3001",
+			},
+		},
+		"tools":     tools,
+		"resources": resources,
+		"services":  activeServices,
+	})
+}
+
+// ---------------------------------------------------------------------------
 // Serialization helpers (avoid exposing sensitive fields like DSN, password)
 // ---------------------------------------------------------------------------
 

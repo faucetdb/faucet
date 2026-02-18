@@ -69,6 +69,8 @@ func newTestEnv(t *testing.T) *testEnv {
 		r.Get("/api-key", sysHandler.ListAPIKeys)
 		r.Post("/api-key", sysHandler.CreateAPIKey)
 		r.Delete("/api-key/{keyId}", sysHandler.RevokeAPIKey)
+
+		r.Get("/mcp", sysHandler.MCPInfo)
 	})
 
 	return &testEnv{

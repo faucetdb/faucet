@@ -9,6 +9,7 @@ import { ApiExplorer } from './pages/ApiExplorer';
 import { Roles } from './pages/Roles';
 import { ApiKeys } from './pages/ApiKeys';
 import { Settings } from './pages/Settings';
+import { MCP } from './pages/MCP';
 import { Setup } from './pages/Setup';
 import { Login } from './pages/Login';
 
@@ -150,6 +151,7 @@ export function App() {
               <Route path="/roles" component={Roles} />
               <Route path="/api-keys" component={ApiKeys} />
               <Route path="/settings" component={Settings} />
+              <Route path="/mcp" component={MCP} />
               <Route path="/setup" component={Setup} />
             </Router>
           </div>
