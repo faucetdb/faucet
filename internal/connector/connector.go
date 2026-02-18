@@ -3,9 +3,11 @@ package connector
 import (
 	"context"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/faucetdb/faucet/internal/model"
@@ -109,14 +111,69 @@ type Connector interface {
 // failures that surface as "Service not found" because the connector never
 // registers in the live registry.
 //
-// MySQL and Snowflake use non-URL DSN formats and are returned unchanged.
+// MySQL DSNs are normalized to use the tcp() wrapper required by go-sql-driver.
+// Snowflake uses its own non-URL DSN format and is returned unchanged.
 func SanitizeDSN(driver, dsn string) string {
 	switch driver {
 	case "postgres", "mssql":
 		return sanitizeURLDSN(dsn)
+	case "mysql":
+		return sanitizeMySQLDSN(dsn)
 	default:
 		return dsn
 	}
+}
+
+// mysqlBareHostPort matches "user:pass@host:port/db" (no tcp() wrapper, no ()
+// wrapper). We look for the last "@" followed by what looks like host:port/db.
+var mysqlBareHostPort = regexp.MustCompile(`^(.+)@([^(@]+:\d+)(/.*)?$`)
+
+// sanitizeMySQLDSN normalizes a MySQL DSN so that go-sql-driver/mysql can
+// parse it correctly. The driver requires the format:
+//
+//	user:pass@tcp(host:port)/dbname
+//
+// Common mistakes from users:
+//
+//	user:pass@host:port/db          → missing tcp() wrapper
+//	user:pass@(host:port)/db        → missing "tcp" before parens
+//	user:pass@tcp(host:port)/db     → already correct
+//
+// When the password contains "@", the driver's ParseDSN splits on the last
+// "@" before "/" — this works ONLY when "tcp(" is present, otherwise the
+// parser treats the password fragment as a network name.
+func sanitizeMySQLDSN(dsn string) string {
+	// If it already parses cleanly and has a known network, trust it.
+	if cfg, err := mysqldriver.ParseDSN(dsn); err == nil && (cfg.Net == "tcp" || cfg.Net == "unix") {
+		return cfg.FormatDSN()
+	}
+
+	// Try to fix common patterns.
+
+	// Pattern: user:pass@(host:port)/db — missing "tcp" keyword.
+	// Find the last "@" followed immediately by "(" but NOT preceded by
+	// a network name like "tcp" or "unix".
+	if idx := strings.LastIndex(dsn, "@("); idx >= 0 {
+		// Insert "tcp" between "@" and "("
+		fixed := dsn[:idx] + "@tcp" + dsn[idx+1:]
+		if cfg, err := mysqldriver.ParseDSN(fixed); err == nil {
+			return cfg.FormatDSN()
+		}
+	}
+
+	// Pattern: user:pass@host:port/db — no parens at all.
+	if m := mysqlBareHostPort.FindStringSubmatch(dsn); m != nil {
+		userpass := m[1] // everything before the last @host:port
+		hostport := m[2]
+		dbpart := m[3] // /dbname or empty
+		fixed := userpass + "@tcp(" + hostport + ")" + dbpart
+		if cfg, err := mysqldriver.ParseDSN(fixed); err == nil {
+			return cfg.FormatDSN()
+		}
+	}
+
+	// Nothing worked — return as-is and let the connect call give a clear error.
+	return dsn
 }
 
 // sanitizeURLDSN parses a DSN that begins with a scheme (e.g.

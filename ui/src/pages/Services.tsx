@@ -122,13 +122,26 @@ export function Services() {
       case 'postgres':
         return 'postgres://user:pass@localhost:5432/dbname?sslmode=disable';
       case 'mysql':
-        return 'user:pass@tcp(localhost:3306)/dbname';
+        return 'user:pass@tcp(host:3306)/dbname';
       case 'mssql':
         return 'sqlserver://user:pass@localhost:1433?database=dbname';
       case 'snowflake':
         return 'user:pass@account/dbname/schema?warehouse=wh';
       default:
         return '';
+    }
+  }
+
+  function dsnHelpText(driver: string): string {
+    switch (driver) {
+      case 'mysql':
+        return 'Format: user:pass@tcp(host:port)/dbname — the tcp() wrapper is required';
+      case 'postgres':
+        return 'Format: postgres://user:pass@host:port/dbname?sslmode=disable';
+      case 'mssql':
+        return 'Format: sqlserver://user:pass@host:port?database=dbname';
+      default:
+        return 'Full connection string for the database';
     }
   }
 
@@ -290,7 +303,7 @@ export function Services() {
               value={form.dsn}
               onInput={(e) => setForm({ ...form, dsn: (e.target as HTMLInputElement).value })}
             />
-            <p class="text-xs text-text-muted mt-1">Full connection string for the database</p>
+            <p class="text-xs text-text-muted mt-1">{dsnHelpText(form.driver)}</p>
           </div>
 
           <div>
