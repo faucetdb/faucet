@@ -18,13 +18,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X main.version=$(git describe --tags --always 2>/dev/null || echo dev)" \
     -o /faucet ./cmd/faucet
 
-# Stage 3: Final image (scratch for minimal size)
-FROM scratch
-COPY --from=go-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=go-builder /faucet /faucet
+# Stage 3: Final image (alpine for shell access + minimal size)
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates
+COPY --from=go-builder /faucet /usr/local/bin/faucet
 
 EXPOSE 8080
 VOLUME /data
 
-ENTRYPOINT ["/faucet"]
+ENTRYPOINT ["faucet"]
 CMD ["serve", "--host", "0.0.0.0"]
