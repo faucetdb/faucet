@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/faucetdb/faucet/internal/config"
+	"github.com/faucetdb/faucet/internal/connector"
 	"github.com/faucetdb/faucet/internal/model"
 	"github.com/faucetdb/faucet/internal/service"
 )
@@ -19,15 +20,17 @@ import (
 // SystemHandler manages Faucet's own configuration: services, roles, admins,
 // and API keys.
 type SystemHandler struct {
-	store   *config.Store
-	authSvc *service.AuthService
+	store    *config.Store
+	authSvc  *service.AuthService
+	registry *connector.Registry
 }
 
 // NewSystemHandler creates a new SystemHandler.
-func NewSystemHandler(store *config.Store, authSvc *service.AuthService) *SystemHandler {
+func NewSystemHandler(store *config.Store, authSvc *service.AuthService, registry *connector.Registry) *SystemHandler {
 	return &SystemHandler{
-		store:   store,
-		authSvc: authSvc,
+		store:    store,
+		authSvc:  authSvc,
+		registry: registry,
 	}
 }
 
@@ -182,6 +185,26 @@ func (h *SystemHandler) CreateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Connect the service in the live connector registry so it's immediately usable.
+	cfg := connector.ConnectionConfig{
+		Driver:          svc.Driver,
+		DSN:             svc.DSN,
+		PrivateKeyPath:  svc.PrivateKeyPath,
+		SchemaName:      svc.Schema,
+		MaxOpenConns:    svc.Pool.MaxOpenConns,
+		MaxIdleConns:    svc.Pool.MaxIdleConns,
+		ConnMaxLifetime: svc.Pool.ConnMaxLifetime,
+		ConnMaxIdleTime: svc.Pool.ConnMaxIdleTime,
+	}
+	if err := h.registry.Connect(svc.Name, cfg); err != nil {
+		// Service is persisted but connection failed — report it but don't fail the create.
+		writeJSON(w, http.StatusCreated, map[string]interface{}{
+			"service":            serviceToMap(&svc),
+			"connection_warning": "Service saved but connection failed: " + err.Error(),
+		})
+		return
+	}
+
 	writeJSON(w, http.StatusCreated, serviceToMap(&svc))
 }
 
@@ -249,6 +272,30 @@ func (h *SystemHandler) UpdateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reconnect the service in the registry with updated config.
+	if existing.IsActive {
+		cfg := connector.ConnectionConfig{
+			Driver:          existing.Driver,
+			DSN:             existing.DSN,
+			PrivateKeyPath:  existing.PrivateKeyPath,
+			SchemaName:      existing.Schema,
+			MaxOpenConns:    existing.Pool.MaxOpenConns,
+			MaxIdleConns:    existing.Pool.MaxIdleConns,
+			ConnMaxLifetime: existing.Pool.ConnMaxLifetime,
+			ConnMaxIdleTime: existing.Pool.ConnMaxIdleTime,
+		}
+		if err := h.registry.Connect(existing.Name, cfg); err != nil {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"service":            serviceToMap(existing),
+				"connection_warning": "Service updated but reconnection failed: " + err.Error(),
+			})
+			return
+		}
+	} else {
+		// Service deactivated — disconnect from registry.
+		_ = h.registry.Disconnect(existing.Name)
+	}
+
 	writeJSON(w, http.StatusOK, serviceToMap(existing))
 }
 
@@ -271,6 +318,9 @@ func (h *SystemHandler) DeleteService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to delete service: "+err.Error())
 		return
 	}
+
+	// Disconnect from the live registry.
+	_ = h.registry.Disconnect(name)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,

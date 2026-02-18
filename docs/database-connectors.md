@@ -35,6 +35,8 @@ host=localhost port=5432 user=myuser password=mypass dbname=mydb sslmode=disable
 | `connect_timeout` | -- | Connection timeout in seconds |
 | `application_name` | -- | Application name for `pg_stat_activity` |
 
+**Important:** If your password contains special characters (`@`, `#`, `*`, `%`, etc.), you must URL-encode them in the DSN. For example, a password of `Pa@ss#1` becomes `Pa%40ss%231`.
+
 ### DSN Examples
 
 ```bash
@@ -163,6 +165,8 @@ server=host;port=1433;user id=username;password=password;database=dbname
 | `TrustServerCertificate` | `false` | Trust self-signed certificates |
 | `app name` | -- | Application name |
 | `connection timeout` | `0` | Connection timeout in seconds |
+
+**Important:** If your password contains special characters (`@`, `#`, `%`, etc.), you must URL-encode them in the DSN. For example, `%` becomes `%25`, `@` becomes `%40`.
 
 ### DSN Examples
 

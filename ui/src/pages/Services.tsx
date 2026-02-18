@@ -8,7 +8,7 @@ interface Service {
   driver: string;
   dsn: string;
   schema: string;
-  active: boolean;
+  is_active: boolean;
   created_at: string;
 }
 
@@ -179,7 +179,7 @@ export function Services() {
                     <p class="text-xs text-text-muted">{svc.driver}</p>
                   </div>
                 </div>
-                <StatusBadge status={svc.active ? 'active' : 'inactive'} />
+                <StatusBadge status={svc.is_active ? 'active' : 'inactive'} />
               </div>
 
               {svc.schema && (

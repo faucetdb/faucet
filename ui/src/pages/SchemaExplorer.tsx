@@ -8,11 +8,11 @@ interface TableInfo {
 
 interface ColumnInfo {
   name: string;
-  type: string;
+  db_type: string;
   nullable: boolean;
-  default_value: string | null;
+  default?: string | null;
   is_primary_key: boolean;
-  is_foreign_key: boolean;
+  is_foreign_key?: boolean;
   references?: {
     table: string;
     column: string;
@@ -80,7 +80,8 @@ export function SchemaExplorer() {
     t.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  function typeColor(type: string): string {
+  function typeColor(type: string | undefined): string {
+    if (!type) return 'text-text-secondary';
     const t = type.toLowerCase();
     if (t.includes('int') || t.includes('serial') || t.includes('numeric') || t.includes('decimal') || t.includes('float') || t.includes('double')) return 'text-cyan-accent';
     if (t.includes('varchar') || t.includes('text') || t.includes('char')) return 'text-success';
@@ -243,8 +244,8 @@ export function SchemaExplorer() {
                               </span>
                             </td>
                             <td class="px-6 py-3">
-                              <span class={`font-mono text-xs ${typeColor(col.type)}`}>
-                                {col.type}
+                              <span class={`font-mono text-xs ${typeColor(col.db_type)}`}>
+                                {col.db_type}
                               </span>
                             </td>
                             <td class="px-6 py-3">
@@ -254,7 +255,7 @@ export function SchemaExplorer() {
                             </td>
                             <td class="px-6 py-3">
                               <span class="font-mono text-xs text-text-muted">
-                                {col.default_value || '--'}
+                                {col.default || '--'}
                               </span>
                             </td>
                             <td class="px-6 py-3">

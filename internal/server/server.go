@@ -102,7 +102,7 @@ func (s *Server) setupRouter() {
 
 		// System APIs (admin management)
 		r.Route("/system", func(r chi.Router) {
-			sysHandler := handler.NewSystemHandler(s.store, s.authSvc)
+			sysHandler := handler.NewSystemHandler(s.store, s.authSvc, s.registry)
 
 			// Session endpoints are unauthenticated (login) or self-authenticated (logout)
 			r.Post("/admin/session", sysHandler.Login)

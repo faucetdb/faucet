@@ -12,7 +12,7 @@ brew install faucetdb/tap/faucet
 
 ### Go Install
 
-Requires Go 1.24+:
+Requires Go 1.25+:
 
 ```bash
 go install github.com/faucetdb/faucet/cmd/faucet@latest
