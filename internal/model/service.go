@@ -9,7 +9,7 @@ type ServiceConfig struct {
 	Name      string     `json:"name" db:"name"`
 	Label     string     `json:"label" db:"label"`
 	Driver    string     `json:"driver" db:"driver"` // postgres, mysql, mssql, snowflake
-	DSN       string     `json:"-" db:"dsn"`          // Never expose in JSON
+	DSN       string     `json:"dsn,omitempty" db:"dsn"` // Accepted on input; omitted in list responses via serviceToMap
 	Schema    string     `json:"schema" db:"schema_name"`
 	ReadOnly  bool       `json:"read_only" db:"read_only"`
 	RawSQL    bool       `json:"raw_sql_allowed" db:"raw_sql_allowed"`

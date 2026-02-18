@@ -1,4 +1,4 @@
-package postgres
+package snowflake
 
 import (
 	"context"
@@ -10,17 +10,15 @@ import (
 )
 
 // BuildSelect constructs a SELECT query from the given request.
-// It quotes all identifiers, applies field selection, filtering, ordering,
-// and pagination using PostgreSQL $N parameter placeholders.
-func (c *PostgresConnector) BuildSelect(_ context.Context, req connector.SelectRequest) (string, []interface{}, error) {
+// It quotes all identifiers using double quotes, applies field selection,
+// filtering, ordering, and pagination using ? parameter placeholders.
+func (c *SnowflakeConnector) BuildSelect(_ context.Context, req connector.SelectRequest) (string, []interface{}, error) {
 	if req.Table == "" {
 		return "", nil, fmt.Errorf("table name is required")
 	}
 
 	var b strings.Builder
 	var args []interface{}
-	args = append(args, req.FilterArgs...)
-	paramIdx := len(args) + 1
 
 	// SELECT clause
 	b.WriteString("SELECT ")
@@ -54,26 +52,23 @@ func (c *PostgresConnector) BuildSelect(_ context.Context, req connector.SelectR
 
 	// LIMIT clause
 	if req.Limit > 0 {
-		b.WriteString(fmt.Sprintf(" LIMIT $%d", paramIdx))
+		b.WriteString(" LIMIT ?")
 		args = append(args, req.Limit)
-		paramIdx++
 	}
 
 	// OFFSET clause
 	if req.Offset > 0 {
-		b.WriteString(fmt.Sprintf(" OFFSET $%d", paramIdx))
+		b.WriteString(" OFFSET ?")
 		args = append(args, req.Offset)
-		paramIdx++
 	}
 
 	return b.String(), args, nil
 }
 
-// BuildInsert constructs an INSERT query with RETURNING * for PostgreSQL.
-// It supports batch inserts with multiple value rows. All column names are
-// derived from the first record, and subsequent records must have the same
-// columns.
-func (c *PostgresConnector) BuildInsert(_ context.Context, req connector.InsertRequest) (string, []interface{}, error) {
+// BuildInsert constructs an INSERT query for Snowflake.
+// Snowflake does not support RETURNING; callers should query separately
+// to retrieve inserted rows.
+func (c *SnowflakeConnector) BuildInsert(_ context.Context, req connector.InsertRequest) (string, []interface{}, error) {
 	if req.Table == "" {
 		return "", nil, fmt.Errorf("table name is required")
 	}
@@ -87,12 +82,10 @@ func (c *PostgresConnector) BuildInsert(_ context.Context, req connector.InsertR
 	for col := range firstRecord {
 		columns = append(columns, col)
 	}
-	// Sort for deterministic output
 	sortStrings(columns)
 
 	var b strings.Builder
 	var args []interface{}
-	paramIdx := 1
 
 	// INSERT INTO
 	b.WriteString("INSERT INTO ")
@@ -120,24 +113,18 @@ func (c *PostgresConnector) BuildInsert(_ context.Context, req connector.InsertR
 			if colIdx > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(fmt.Sprintf("$%d", paramIdx))
+			b.WriteString("?")
 			args = append(args, record[col])
-			paramIdx++
 		}
 		b.WriteString(")")
 	}
-
-	// RETURNING * for PostgreSQL
-	b.WriteString(" RETURNING *")
 
 	return b.String(), args, nil
 }
 
 // BuildUpdate constructs an UPDATE query with parameterized SET values.
-// It supports both filter-based and ID-based updates. When IDs are provided
-// without a filter, the first primary key column would need to be specified;
-// for now, IDs are applied as an IN clause on the "id" column by convention.
-func (c *PostgresConnector) BuildUpdate(_ context.Context, req connector.UpdateRequest) (string, []interface{}, error) {
+// Snowflake does not support RETURNING; callers should check RowsAffected().
+func (c *SnowflakeConnector) BuildUpdate(_ context.Context, req connector.UpdateRequest) (string, []interface{}, error) {
 	if req.Table == "" {
 		return "", nil, fmt.Errorf("table name is required")
 	}
@@ -157,7 +144,6 @@ func (c *PostgresConnector) BuildUpdate(_ context.Context, req connector.UpdateR
 
 	var b strings.Builder
 	var args []interface{}
-	paramIdx := 1
 
 	// UPDATE
 	b.WriteString("UPDATE ")
@@ -172,9 +158,8 @@ func (c *PostgresConnector) BuildUpdate(_ context.Context, req connector.UpdateR
 			b.WriteString(", ")
 		}
 		b.WriteString(c.QuoteIdentifier(col))
-		b.WriteString(fmt.Sprintf(" = $%d", paramIdx))
+		b.WriteString(" = ?")
 		args = append(args, req.Record[col])
-		paramIdx++
 	}
 
 	// WHERE clause
@@ -188,9 +173,8 @@ func (c *PostgresConnector) BuildUpdate(_ context.Context, req connector.UpdateR
 	if len(req.IDs) > 0 {
 		placeholders := make([]string, len(req.IDs))
 		for i, id := range req.IDs {
-			placeholders[i] = fmt.Sprintf("$%d", paramIdx)
+			placeholders[i] = "?"
 			args = append(args, id)
-			paramIdx++
 		}
 		idClause := fmt.Sprintf("%s IN (%s)", c.QuoteIdentifier("id"), strings.Join(placeholders, ", "))
 		whereParts = append(whereParts, idClause)
@@ -198,15 +182,11 @@ func (c *PostgresConnector) BuildUpdate(_ context.Context, req connector.UpdateR
 
 	b.WriteString(strings.Join(whereParts, " AND "))
 
-	// RETURNING * for PostgreSQL
-	b.WriteString(" RETURNING *")
-
 	return b.String(), args, nil
 }
 
 // BuildDelete constructs a DELETE query with parameterized WHERE conditions.
-// It supports both filter-based and ID-based deletes.
-func (c *PostgresConnector) BuildDelete(_ context.Context, req connector.DeleteRequest) (string, []interface{}, error) {
+func (c *SnowflakeConnector) BuildDelete(_ context.Context, req connector.DeleteRequest) (string, []interface{}, error) {
 	if req.Table == "" {
 		return "", nil, fmt.Errorf("table name is required")
 	}
@@ -216,7 +196,6 @@ func (c *PostgresConnector) BuildDelete(_ context.Context, req connector.DeleteR
 
 	var b strings.Builder
 	var args []interface{}
-	paramIdx := 1
 
 	// DELETE FROM
 	b.WriteString("DELETE FROM ")
@@ -235,9 +214,8 @@ func (c *PostgresConnector) BuildDelete(_ context.Context, req connector.DeleteR
 	if len(req.IDs) > 0 {
 		placeholders := make([]string, len(req.IDs))
 		for i, id := range req.IDs {
-			placeholders[i] = fmt.Sprintf("$%d", paramIdx)
+			placeholders[i] = "?"
 			args = append(args, id)
-			paramIdx++
 		}
 		idClause := fmt.Sprintf("%s IN (%s)", c.QuoteIdentifier("id"), strings.Join(placeholders, ", "))
 		whereParts = append(whereParts, idClause)
@@ -249,7 +227,7 @@ func (c *PostgresConnector) BuildDelete(_ context.Context, req connector.DeleteR
 }
 
 // BuildCount constructs a SELECT COUNT(*) query with optional filtering.
-func (c *PostgresConnector) BuildCount(_ context.Context, req connector.CountRequest) (string, []interface{}, error) {
+func (c *SnowflakeConnector) BuildCount(_ context.Context, req connector.CountRequest) (string, []interface{}, error) {
 	if req.Table == "" {
 		return "", nil, fmt.Errorf("table name is required")
 	}
@@ -270,8 +248,8 @@ func (c *PostgresConnector) BuildCount(_ context.Context, req connector.CountReq
 }
 
 // CreateTable creates a new table from a TableSchema definition, translating
-// Go/model types back to PostgreSQL column types.
-func (c *PostgresConnector) CreateTable(ctx context.Context, def model.TableSchema) error {
+// Go/model types to Snowflake column types.
+func (c *SnowflakeConnector) CreateTable(ctx context.Context, def model.TableSchema) error {
 	if def.Name == "" {
 		return fmt.Errorf("table name is required")
 	}
@@ -292,15 +270,14 @@ func (c *PostgresConnector) CreateTable(ctx context.Context, def model.TableSche
 		b.WriteString(c.QuoteIdentifier(col.Name))
 		b.WriteString(" ")
 
-		// Use auto-increment types for serial columns
 		if col.IsAutoIncrement {
 			if col.GoType == "int64" {
-				b.WriteString("BIGSERIAL")
+				b.WriteString("NUMBER(38,0) AUTOINCREMENT")
 			} else {
-				b.WriteString("SERIAL")
+				b.WriteString("NUMBER(10,0) AUTOINCREMENT")
 			}
 		} else {
-			b.WriteString(goTypeToPostgres(col))
+			b.WriteString(goTypeToSnowflake(col))
 		}
 
 		if !col.Nullable {
@@ -309,6 +286,9 @@ func (c *PostgresConnector) CreateTable(ctx context.Context, def model.TableSche
 		if col.Default != nil && !col.IsAutoIncrement {
 			b.WriteString(" DEFAULT ")
 			b.WriteString(*col.Default)
+		}
+		if col.Comment != "" {
+			b.WriteString(fmt.Sprintf(" COMMENT '%s'", strings.ReplaceAll(col.Comment, "'", "''")))
 		}
 	}
 
@@ -356,7 +336,7 @@ func (c *PostgresConnector) CreateTable(ctx context.Context, def model.TableSche
 }
 
 // AlterTable applies a list of schema changes to an existing table.
-func (c *PostgresConnector) AlterTable(ctx context.Context, tableName string, changes []connector.SchemaChange) error {
+func (c *SnowflakeConnector) AlterTable(ctx context.Context, tableName string, changes []connector.SchemaChange) error {
 	if tableName == "" {
 		return fmt.Errorf("table name is required")
 	}
@@ -374,7 +354,7 @@ func (c *PostgresConnector) AlterTable(ctx context.Context, tableName string, ch
 			if change.Definition == nil {
 				return fmt.Errorf("column definition required for add_column")
 			}
-			colType := goTypeToPostgres(*change.Definition)
+			colType := goTypeToSnowflake(*change.Definition)
 			nullStr := ""
 			if !change.Definition.Nullable {
 				nullStr = " NOT NULL"
@@ -411,8 +391,8 @@ func (c *PostgresConnector) AlterTable(ctx context.Context, tableName string, ch
 			if change.Definition == nil {
 				return fmt.Errorf("column definition required for modify_column")
 			}
-			colType := goTypeToPostgres(*change.Definition)
-			stmt = fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s",
+			colType := goTypeToSnowflake(*change.Definition)
+			stmt = fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s %s",
 				qualifiedTable,
 				c.QuoteIdentifier(change.Column),
 				colType,
@@ -431,7 +411,7 @@ func (c *PostgresConnector) AlterTable(ctx context.Context, tableName string, ch
 }
 
 // DropTable drops a table from the database.
-func (c *PostgresConnector) DropTable(ctx context.Context, tableName string) error {
+func (c *SnowflakeConnector) DropTable(ctx context.Context, tableName string) error {
 	if tableName == "" {
 		return fmt.Errorf("table name is required")
 	}
@@ -447,9 +427,8 @@ func (c *PostgresConnector) DropTable(ctx context.Context, tableName string) err
 	return nil
 }
 
-// CallProcedure executes a stored procedure or function using SELECT * FROM
-// notation, which works for PostgreSQL functions that return result sets.
-func (c *PostgresConnector) CallProcedure(ctx context.Context, name string, params map[string]interface{}) ([]map[string]interface{}, error) {
+// CallProcedure executes a stored procedure using CALL notation for Snowflake.
+func (c *SnowflakeConnector) CallProcedure(ctx context.Context, name string, params map[string]interface{}) ([]map[string]interface{}, error) {
 	if name == "" {
 		return nil, fmt.Errorf("procedure name is required")
 	}
@@ -464,11 +443,11 @@ func (c *PostgresConnector) CallProcedure(ctx context.Context, name string, para
 	placeholders := make([]string, len(paramNames))
 	args := make([]interface{}, len(paramNames))
 	for i, pn := range paramNames {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		placeholders[i] = "?"
 		args[i] = params[pn]
 	}
 
-	query := fmt.Sprintf("SELECT * FROM %s.%s(%s)",
+	query := fmt.Sprintf("CALL %s.%s(%s)",
 		c.QuoteIdentifier(c.schemaName),
 		c.QuoteIdentifier(name),
 		strings.Join(placeholders, ", "),
@@ -500,55 +479,53 @@ func (c *PostgresConnector) CallProcedure(ctx context.Context, name string, para
 	return results, nil
 }
 
-// goTypeToPostgres maps a model.Column's GoType back to a PostgreSQL type
+// goTypeToSnowflake maps a model.Column's GoType to a Snowflake column type
 // for use in CREATE TABLE and ALTER TABLE statements.
-func goTypeToPostgres(col model.Column) string {
-	// If the original DB type is set and looks like a real PG type, use it
+func goTypeToSnowflake(col model.Column) string {
+	// If the original DB type is set, use it directly
 	if col.Type != "" {
-		return pgTypeWithLength(col.Type, col.MaxLength)
+		return snowflakeTypeWithLength(col.Type, col.MaxLength)
 	}
 
 	// Fall back to mapping from GoType
 	switch col.GoType {
 	case "int32":
-		return "INTEGER"
+		return "NUMBER(10,0)"
 	case "int64":
-		return "BIGINT"
+		return "NUMBER(38,0)"
 	case "float32":
-		return "REAL"
+		return "FLOAT"
 	case "float64":
-		return "DOUBLE PRECISION"
+		return "FLOAT"
 	case "string":
 		if col.MaxLength != nil {
 			return fmt.Sprintf("VARCHAR(%d)", *col.MaxLength)
 		}
-		return "TEXT"
+		return "VARCHAR"
 	case "bool":
 		return "BOOLEAN"
 	case "time.Time":
-		return "TIMESTAMPTZ"
+		return "TIMESTAMP_NTZ"
 	case "[]byte":
-		return "BYTEA"
+		return "BINARY"
 	case "interface{}":
-		return "JSONB"
+		return "VARIANT"
 	default:
-		return "TEXT"
+		return "VARCHAR"
 	}
 }
 
-// pgTypeWithLength appends a length specifier to varchar/char types if a
-// max length is defined.
-func pgTypeWithLength(typeName string, maxLength *int64) string {
-	lower := strings.ToLower(typeName)
-	if maxLength != nil && (lower == "varchar" || lower == "character varying" || lower == "char" || lower == "character") {
+// snowflakeTypeWithLength appends a length specifier to varchar/char types if
+// a max length is defined.
+func snowflakeTypeWithLength(typeName string, maxLength *int64) string {
+	upper := strings.ToUpper(typeName)
+	if maxLength != nil && (upper == "VARCHAR" || upper == "STRING" || upper == "CHAR" || upper == "CHARACTER" || upper == "BINARY" || upper == "VARBINARY") {
 		return fmt.Sprintf("%s(%d)", typeName, *maxLength)
 	}
 	return typeName
 }
 
 // sortStrings sorts a string slice in place using a simple insertion sort.
-// This avoids importing "sort" for a small utility used only on column name
-// lists (typically < 100 elements).
 func sortStrings(s []string) {
 	for i := 1; i < len(s); i++ {
 		key := s[i]

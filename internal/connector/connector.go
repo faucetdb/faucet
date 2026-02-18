@@ -11,13 +11,14 @@ import (
 
 // SelectRequest represents a query for records.
 type SelectRequest struct {
-	Table  string
-	Fields []string
-	Filter string
-	Order  string
-	Limit  int
-	Offset int
-	Cursor string
+	Table      string
+	Fields     []string
+	Filter     string
+	FilterArgs []interface{}
+	Order      string
+	Limit      int
+	Offset     int
+	Cursor     string
 }
 
 // InsertRequest represents an insert operation.
@@ -28,23 +29,26 @@ type InsertRequest struct {
 
 // UpdateRequest represents an update operation.
 type UpdateRequest struct {
-	Table  string
-	Filter string
-	Record map[string]interface{}
-	IDs    []interface{} // for updating by primary key
+	Table      string
+	Filter     string
+	FilterArgs []interface{}
+	Record     map[string]interface{}
+	IDs        []interface{} // for updating by primary key
 }
 
 // DeleteRequest represents a delete operation.
 type DeleteRequest struct {
-	Table  string
-	Filter string
-	IDs    []interface{}
+	Table      string
+	Filter     string
+	FilterArgs []interface{}
+	IDs        []interface{}
 }
 
 // CountRequest represents a count query.
 type CountRequest struct {
-	Table  string
-	Filter string
+	Table      string
+	Filter     string
+	FilterArgs []interface{}
 }
 
 // ConnectionConfig holds database connection parameters.

@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os/signal"
@@ -18,6 +20,7 @@ import (
 	"github.com/faucetdb/faucet/internal/handler"
 	"github.com/faucetdb/faucet/internal/server/middleware"
 	"github.com/faucetdb/faucet/internal/service"
+	"github.com/faucetdb/faucet/internal/ui"
 )
 
 // Config holds the HTTP server configuration.
@@ -112,16 +115,16 @@ func (s *Server) setupRouter() {
 				// Service management
 				r.Get("/service", sysHandler.ListServices)
 				r.Post("/service", sysHandler.CreateService)
-				r.Get("/service/{id}", sysHandler.GetService)
-				r.Put("/service/{id}", sysHandler.UpdateService)
-				r.Delete("/service/{id}", sysHandler.DeleteService)
+				r.Get("/service/{serviceName}", sysHandler.GetService)
+				r.Put("/service/{serviceName}", sysHandler.UpdateService)
+				r.Delete("/service/{serviceName}", sysHandler.DeleteService)
 
 				// Role management
 				r.Get("/role", sysHandler.ListRoles)
 				r.Post("/role", sysHandler.CreateRole)
-				r.Get("/role/{id}", sysHandler.GetRole)
-				r.Put("/role/{id}", sysHandler.UpdateRole)
-				r.Delete("/role/{id}", sysHandler.DeleteRole)
+				r.Get("/role/{roleId}", sysHandler.GetRole)
+				r.Put("/role/{roleId}", sysHandler.UpdateRole)
+				r.Delete("/role/{roleId}", sysHandler.DeleteRole)
 
 				// Admin management
 				r.Get("/admin", sysHandler.ListAdmins)
@@ -130,7 +133,7 @@ func (s *Server) setupRouter() {
 				// API key management
 				r.Get("/api-key", sysHandler.ListAPIKeys)
 				r.Post("/api-key", sysHandler.CreateAPIKey)
-				r.Delete("/api-key/{id}", sysHandler.RevokeAPIKey)
+				r.Delete("/api-key/{keyId}", sysHandler.RevokeAPIKey)
 			})
 		})
 
@@ -167,20 +170,44 @@ func (s *Server) setupRouter() {
 		})
 	})
 
-	// --- Embedded admin UI (placeholder) ---
+	// --- Embedded admin UI ---
 	if s.cfg.EnableUI {
-		r.Get("/admin", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write([]byte(`<!DOCTYPE html>
-<html><head><title>Faucet Admin</title></head>
-<body><h1>Faucet Admin UI</h1><p>Coming soon.</p></body></html>`))
-		})
-		r.Get("/setup", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write([]byte(`<!DOCTYPE html>
-<html><head><title>Faucet Setup</title></head>
-<body><h1>Faucet Setup</h1><p>Coming soon.</p></body></html>`))
-		})
+		// Serve the embedded SPA. The dist/ directory is produced by
+		// `cd ui && npm run build` and embedded via go:embed in internal/ui.
+		distFS, err := fs.Sub(ui.Dist, "dist")
+		if err != nil {
+			s.logger.Error("failed to create sub filesystem for UI", "error", err)
+		} else {
+			fileServer := http.FileServer(http.FS(distFS))
+			// Serve static assets directly
+			r.Handle("/assets/*", fileServer)
+			r.Get("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+				fileServer.ServeHTTP(w, r)
+			})
+			// SPA fallback: serve index.html for all UI routes
+			spaHandler := func(w http.ResponseWriter, r *http.Request) {
+				f, err := distFS.Open("index.html")
+				if err != nil {
+					http.Error(w, "UI not available", http.StatusNotFound)
+					return
+				}
+				defer f.Close()
+				stat, _ := f.Stat()
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				http.ServeContent(w, r, "index.html", stat.ModTime(), f.(io.ReadSeeker))
+			}
+			r.Get("/admin", spaHandler)
+			r.Get("/admin/*", spaHandler)
+			r.Get("/setup", spaHandler)
+			r.Get("/services", spaHandler)
+			r.Get("/schema", spaHandler)
+			r.Get("/api-explorer", spaHandler)
+			r.Get("/roles", spaHandler)
+			r.Get("/api-keys", spaHandler)
+			r.Get("/settings", spaHandler)
+			// Root serves the SPA
+			r.Get("/", spaHandler)
+		}
 	}
 
 	s.router = r
