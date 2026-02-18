@@ -61,8 +61,7 @@ export function Services() {
   async function handleTestConnection(serviceName: string) {
     setTesting(serviceName);
     try {
-      // Test by fetching the schema - if the connection is working, this should succeed
-      await apiFetch(`/api/v1/${serviceName}/_schema`);
+      await apiFetch(`/api/v1/system/service/${serviceName}/test`);
       setTestResults({ ...testResults, [serviceName]: { ok: true, message: 'Connection successful' } });
     } catch (err) {
       setTestResults({
@@ -90,9 +89,17 @@ export function Services() {
         body.schema = form.schema;
       }
 
-      await apiFetch('/api/v1/system/service', { method: 'POST', body });
+      const result = await apiFetch('/api/v1/system/service', { method: 'POST', body });
       setShowModal(false);
-      loadServices();
+      await loadServices();
+
+      // If the backend returned a connection warning, show it on the service card.
+      if (result?.connection_warning) {
+        setTestResults({
+          ...testResults,
+          [form.name]: { ok: false, message: result.connection_warning },
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save service');
     } finally {

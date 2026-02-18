@@ -180,6 +180,10 @@ func (h *SystemHandler) CreateService(w http.ResponseWriter, r *http.Request) {
 
 	svc.IsActive = true
 
+	// Sanitize the DSN to ensure special characters in passwords are properly
+	// URL-encoded for URL-style DSNs (postgres://, sqlserver://).
+	svc.DSN = connector.SanitizeDSN(svc.Driver, svc.DSN)
+
 	if err := h.store.CreateService(r.Context(), &svc); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create service: "+err.Error())
 		return
@@ -255,7 +259,7 @@ func (h *SystemHandler) UpdateService(w http.ResponseWriter, r *http.Request) {
 		existing.Driver = updates.Driver
 	}
 	if updates.DSN != "" {
-		existing.DSN = updates.DSN
+		existing.DSN = connector.SanitizeDSN(existing.Driver, updates.DSN)
 	}
 	if updates.PrivateKeyPath != "" {
 		existing.PrivateKeyPath = updates.PrivateKeyPath
@@ -325,6 +329,48 @@ func (h *SystemHandler) DeleteService(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": "Service '" + name + "' deleted",
+	})
+}
+
+// TestConnection tests an active service's database connectivity by pinging it.
+// GET /api/v2/system/service/{serviceName}/test
+func (h *SystemHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "serviceName")
+
+	conn, err := h.registry.Get(name)
+	if err != nil {
+		// Not in registry — check if it exists in the store to give a better error.
+		svc, storeErr := h.store.GetServiceByName(r.Context(), name)
+		if storeErr != nil {
+			writeError(w, http.StatusNotFound, "Service not found: "+name)
+			return
+		}
+		// Service exists in store but not in registry — try to reconnect it now.
+		cfg := connector.ConnectionConfig{
+			Driver:          svc.Driver,
+			DSN:             svc.DSN,
+			PrivateKeyPath:  svc.PrivateKeyPath,
+			SchemaName:      svc.Schema,
+			MaxOpenConns:    svc.Pool.MaxOpenConns,
+			MaxIdleConns:    svc.Pool.MaxIdleConns,
+			ConnMaxLifetime: svc.Pool.ConnMaxLifetime,
+			ConnMaxIdleTime: svc.Pool.ConnMaxIdleTime,
+		}
+		if connErr := h.registry.Connect(svc.Name, cfg); connErr != nil {
+			writeError(w, http.StatusServiceUnavailable, "Connection failed: "+connErr.Error())
+			return
+		}
+		conn, _ = h.registry.Get(name)
+	}
+
+	if err := conn.Ping(r.Context()); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Ping failed: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Connection successful",
 	})
 }
 

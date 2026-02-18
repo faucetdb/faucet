@@ -119,6 +119,7 @@ func (s *Server) setupRouter() {
 				r.Get("/service/{serviceName}", sysHandler.GetService)
 				r.Put("/service/{serviceName}", sysHandler.UpdateService)
 				r.Delete("/service/{serviceName}", sysHandler.DeleteService)
+				r.Get("/service/{serviceName}/test", sysHandler.TestConnection)
 
 				// Role management
 				r.Get("/role", sysHandler.ListRoles)

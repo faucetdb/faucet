@@ -96,7 +96,7 @@ func runServe(host string, port int, noUI, dev bool, dataDir string) error {
 		}
 		cfg := connector.ConnectionConfig{
 			Driver:          svc.Driver,
-			DSN:             svc.DSN,
+			DSN:             connector.SanitizeDSN(svc.Driver, svc.DSN),
 			PrivateKeyPath:  svc.PrivateKeyPath,
 			SchemaName:      svc.Schema,
 			MaxOpenConns:    svc.Pool.MaxOpenConns,
