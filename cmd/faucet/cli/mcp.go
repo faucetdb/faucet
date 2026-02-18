@@ -107,7 +107,7 @@ func runMCP(transport string, port int, dataDir string) error {
 		addr := fmt.Sprintf(":%d", port)
 		jwtSecret := viper.GetString("auth.jwt_secret")
 		if jwtSecret == "" {
-			jwtSecret = "faucet-dev-secret-change-me"
+			jwtSecret = "faucet-dev-secret-change-me" //nolint:ineffassign // TODO: wire into MCP HTTP auth
 		}
 		logger.Info("starting MCP HTTP server", "addr", addr)
 		return mcpSrv.ServeHTTP(addr)

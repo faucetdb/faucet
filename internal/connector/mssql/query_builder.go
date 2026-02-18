@@ -60,12 +60,12 @@ func (c *MSSQLConnector) BuildSelect(_ context.Context, req connector.SelectRequ
 		offset := req.Offset
 		b.WriteString(fmt.Sprintf(" OFFSET @p%d ROWS", paramIdx))
 		args = append(args, offset)
-		paramIdx++
+		paramIdx++ //nolint:ineffassign // keep paramIdx consistent for future clauses
 
 		if req.Limit > 0 {
 			b.WriteString(fmt.Sprintf(" FETCH NEXT @p%d ROWS ONLY", paramIdx))
 			args = append(args, req.Limit)
-			paramIdx++
+			paramIdx++ //nolint:ineffassign // keep paramIdx consistent for future clauses
 		}
 	}
 

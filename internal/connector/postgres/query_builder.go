@@ -63,7 +63,7 @@ func (c *PostgresConnector) BuildSelect(_ context.Context, req connector.SelectR
 	if req.Offset > 0 {
 		b.WriteString(fmt.Sprintf(" OFFSET $%d", paramIdx))
 		args = append(args, req.Offset)
-		paramIdx++
+		paramIdx++ //nolint:ineffassign // keep paramIdx consistent for future clauses
 	}
 
 	return b.String(), args, nil

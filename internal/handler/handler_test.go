@@ -108,24 +108,6 @@ func (e *testEnv) seedRole(t *testing.T, name string) *model.Role {
 	return role
 }
 
-// seedService creates a service and returns it.
-func (e *testEnv) seedService(t *testing.T, name string) *model.ServiceConfig {
-	t.Helper()
-	svc := &model.ServiceConfig{
-		Name:     name,
-		Label:    "Test " + name,
-		Driver:   "postgres",
-		DSN:      "postgres://localhost/" + name,
-		Schema:   "public",
-		IsActive: true,
-		Pool:     model.DefaultPoolConfig(),
-	}
-	if err := e.store.CreateService(context.Background(), svc); err != nil {
-		t.Fatalf("seedService: %v", err)
-	}
-	return svc
-}
-
 // do executes an HTTP request against the test router and returns the recorder.
 func (e *testEnv) do(t *testing.T, method, path string, body io.Reader) *httptest.ResponseRecorder {
 	t.Helper()

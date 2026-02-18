@@ -834,10 +834,7 @@ func (s *MCPServer) handleRawSQL(
 		return toolError("Row iteration error: %v", err)
 	}
 
-	truncated := false
-	if rowCount >= limit {
-		truncated = true
-	}
+	truncated := rowCount >= limit
 
 	result := map[string]interface{}{
 		"records":   records,

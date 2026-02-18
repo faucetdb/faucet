@@ -1,0 +1,25 @@
+version: "2"
+
+linters:
+  default: standard
+  exclusions:
+    rules:
+      # Don't require checking return values of common safe-to-ignore functions
+      - linters: [errcheck]
+        source: "\\.Close\\(\\)"
+      - linters: [errcheck]
+        source: "fmt\\.(Fprint|Fprintf|Fprintln|Print|Printf|Println|Scanln)"
+      - linters: [errcheck]
+        source: "\\.Write\\("
+      - linters: [errcheck]
+        source: "\\.Encode\\("
+      - linters: [errcheck]
+        source: "MarkFlagRequired"
+      - linters: [errcheck]
+        source: "viper\\.(BindPFlag|ReadInConfig)"
+      - linters: [errcheck]
+        source: "\\.Disconnect\\(\\)"
+      - linters: [errcheck]
+        source: "go s\\.store\\."
+      - linters: [errcheck]
+        path: "_test\\.go"
