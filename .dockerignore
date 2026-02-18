@@ -1,0 +1,9 @@
+.git
+node_modules
+ui/node_modules
+internal/ui/dist
+*.md
+docs/
+docs-site/
+.github/
+.vscode/
