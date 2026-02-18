@@ -24,7 +24,7 @@ export function ApiExplorer() {
   const [url, setUrl] = useState('/api/v1/');
   const [headers, setHeaders] = useState<HeaderEntry[]>([
     { key: 'Content-Type', value: 'application/json', enabled: true },
-    { key: 'X-Faucet-Api-Key', value: '', enabled: false },
+    { key: 'X-API-Key', value: '', enabled: false },
   ]);
   const [body, setBody] = useState('');
   const [response, setResponse] = useState<{
@@ -66,8 +66,8 @@ export function ApiExplorer() {
 
       // Add auth from localStorage if available
       const apiKey = localStorage.getItem('faucet_api_key');
-      if (apiKey && !reqHeaders['X-Faucet-Api-Key']) {
-        reqHeaders['X-Faucet-Api-Key'] = apiKey;
+      if (apiKey && !reqHeaders['X-API-Key']) {
+        reqHeaders['X-API-Key'] = apiKey;
       }
       const session = localStorage.getItem('faucet_session');
       if (session && !reqHeaders['Authorization']) {

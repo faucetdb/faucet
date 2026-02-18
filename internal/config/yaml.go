@@ -49,13 +49,14 @@ type AuthConfig struct {
 
 // ServiceYAML defines a database service in the YAML configuration file.
 type ServiceYAML struct {
-	Name     string          `yaml:"name"`
-	Driver   string          `yaml:"driver"`
-	DSN      string          `yaml:"dsn"`
-	Schema   string          `yaml:"schema"`
-	ReadOnly bool            `yaml:"read_only"`
-	RawSQL   bool            `yaml:"raw_sql_allowed"`
-	Pool     *PoolYAMLConfig `yaml:"pool,omitempty"`
+	Name           string          `yaml:"name"`
+	Driver         string          `yaml:"driver"`
+	DSN            string          `yaml:"dsn"`
+	PrivateKeyPath string          `yaml:"private_key_path,omitempty"` // PEM file for Snowflake JWT auth
+	Schema         string          `yaml:"schema"`
+	ReadOnly       bool            `yaml:"read_only"`
+	RawSQL         bool            `yaml:"raw_sql_allowed"`
+	Pool           *PoolYAMLConfig `yaml:"pool,omitempty"`
 }
 
 // PoolYAMLConfig controls the connection pool for a service in YAML config.

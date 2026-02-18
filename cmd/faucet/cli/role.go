@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/faucetdb/faucet/internal/model"
 )
 
 func newRoleCmd() *cobra.Command {
@@ -41,22 +45,37 @@ func newRoleListCmd() *cobra.Command {
 }
 
 func runRoleList(jsonOutput bool) error {
-	// TODO: open config store, list roles
-	// store, _ := config.Open(...)
-	// roles, err := store.ListRoles()
+	store, err := openConfigStore()
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer store.Close()
 
-	type roleRow struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Active      bool   `json:"active"`
+	ctx := context.Background()
+	roles, err := store.ListRoles(ctx)
+	if err != nil {
+		return fmt.Errorf("list roles: %w", err)
 	}
 
-	roles := []roleRow{} // empty until config store is wired
-
 	if jsonOutput {
+		type roleRow struct {
+			Name        string             `json:"name"`
+			Description string             `json:"description"`
+			Active      bool               `json:"active"`
+			Access      []model.RoleAccess `json:"access"`
+		}
+		rows := make([]roleRow, len(roles))
+		for i, r := range roles {
+			rows[i] = roleRow{
+				Name:        r.Name,
+				Description: r.Description,
+				Active:      r.IsActive,
+				Access:      r.Access,
+			}
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(roles)
+		return enc.Encode(rows)
 	}
 
 	if len(roles) == 0 {
@@ -64,17 +83,46 @@ func runRoleList(jsonOutput bool) error {
 		return nil
 	}
 
-	fmt.Printf("%-20s %-40s %-8s\n", "NAME", "DESCRIPTION", "ACTIVE")
-	fmt.Printf("%-20s %-40s %-8s\n", "----", "-----------", "------")
+	fmt.Printf("%-20s %-40s %-8s %-8s\n", "NAME", "DESCRIPTION", "ACTIVE", "RULES")
+	fmt.Printf("%-20s %-40s %-8s %-8s\n", "----", "-----------", "------", "-----")
 	for _, r := range roles {
 		active := "yes"
-		if !r.Active {
+		if !r.IsActive {
 			active = "no"
 		}
-		fmt.Printf("%-20s %-40s %-8s\n", r.Name, r.Description, active)
+		desc := r.Description
+		if len(desc) > 38 {
+			desc = desc[:35] + "..."
+		}
+		fmt.Printf("%-20s %-40s %-8s %-8s\n", r.Name, desc, active, formatAccessSummary(r.Access))
 	}
 
 	return nil
+}
+
+// formatAccessSummary returns a short summary of access rules for display.
+func formatAccessSummary(access []model.RoleAccess) string {
+	if len(access) == 0 {
+		return "none"
+	}
+
+	// Collect unique services
+	services := make(map[string]bool)
+	for _, a := range access {
+		if a.ServiceName != "" {
+			services[a.ServiceName] = true
+		}
+	}
+
+	parts := make([]string, 0, len(services))
+	for s := range services {
+		parts = append(parts, s)
+	}
+
+	if len(parts) == 0 {
+		return fmt.Sprintf("%d rule(s)", len(access))
+	}
+	return fmt.Sprintf("%d rule(s): %s", len(access), strings.Join(parts, ", "))
 }
 
 // ---------- role create ----------
@@ -103,15 +151,27 @@ func newRoleCreateCmd() *cobra.Command {
 }
 
 func runRoleCreate(name, description string) error {
-	// TODO: open config store, create role
-	// store, _ := config.Open(...)
-	// role := model.Role{Name: name, Description: description, IsActive: true}
-	// err := store.CreateRole(role)
+	store, err := openConfigStore()
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer store.Close()
 
-	fmt.Printf("Created role %q\n", name)
+	ctx := context.Background()
+
+	role := &model.Role{
+		Name:        name,
+		Description: description,
+		IsActive:    true,
+	}
+
+	if err := store.CreateRole(ctx, role); err != nil {
+		return fmt.Errorf("create role: %w", err)
+	}
+
+	fmt.Printf("Created role %q (id=%d)\n", name, role.ID)
 	if description != "" {
 		fmt.Printf("  description: %s\n", description)
 	}
-	fmt.Println("  (placeholder: config store not yet wired)")
 	return nil
 }

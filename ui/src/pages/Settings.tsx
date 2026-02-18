@@ -1,67 +1,47 @@
 import { useState, useEffect } from 'preact/hooks';
 import { apiFetch } from '../hooks/useApi';
 
-interface ServerConfig {
-  listen_addr: string;
-  base_path: string;
-  cors_origins: string;
-  rate_limit: number;
-  log_level: string;
-  mcp_enabled: boolean;
-  mcp_transport: string;
+interface AdminInfo {
+  id: number;
+  username: string;
+  email?: string;
+  created_at: string;
 }
 
 export function Settings() {
-  const [config, setConfig] = useState<ServerConfig>({
-    listen_addr: ':8080',
-    base_path: '/api/v1',
-    cors_origins: '*',
-    rate_limit: 100,
-    log_level: 'info',
-    mcp_enabled: true,
-    mcp_transport: 'stdio',
-  });
+  const [admins, setAdmins] = useState<AdminInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState('server');
+  const [activeSection, setActiveSection] = useState('info');
+
+  // Password change form
+  const [passwordForm, setPasswordForm] = useState({
+    current: '',
+    newPass: '',
+    confirm: '',
+  });
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
 
   useEffect(() => {
-    loadConfig();
+    loadData();
   }, []);
 
-  async function loadConfig() {
+  async function loadData() {
     setLoading(true);
     try {
-      const res = await apiFetch('/api/v1/system/config');
-      setConfig(res);
+      const res = await apiFetch('/api/v1/system/admin');
+      setAdmins(res.resource || []);
     } catch {
-      // Use defaults
+      // ignore
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleSave() {
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      await apiFetch('/api/v1/system/config', { method: 'PUT', body: config });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save configuration');
-    } finally {
-      setSaving(false);
-    }
-  }
-
   const sections = [
-    { id: 'server', label: 'Server', icon: '~' },
-    { id: 'mcp', label: 'MCP', icon: '*' },
-    { id: 'admin', label: 'Admin', icon: '#' },
+    { id: 'info', label: 'Server Info', icon: '~' },
+    { id: 'admins', label: 'Admins', icon: '#' },
+    { id: 'about', label: 'About', icon: '?' },
   ];
 
   if (loading) {
@@ -85,35 +65,10 @@ export function Settings() {
   return (
     <div class="space-y-6">
       {/* Header */}
-      <div class="flex items-center justify-between">
-        <div>
-          <h1 class="text-2xl font-semibold text-text-primary">Settings</h1>
-          <p class="text-sm text-text-secondary mt-1">Server configuration and preferences</p>
-        </div>
-        <div class="flex items-center gap-3">
-          {saved && (
-            <span class="text-sm text-success flex items-center gap-1 animate-fade-in">
-              <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-              </svg>
-              Saved
-            </span>
-          )}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            class="btn-primary"
-          >
-            {saving ? 'Saving...' : 'Save Changes'}
-          </button>
-        </div>
+      <div>
+        <h1 class="text-2xl font-semibold text-text-primary">Settings</h1>
+        <p class="text-sm text-text-secondary mt-1">Server configuration and information</p>
       </div>
-
-      {error && (
-        <div class="p-3 rounded-lg bg-error/10 border border-error/20 text-sm text-error">
-          {error}
-        </div>
-      )}
 
       <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Section nav */}
@@ -139,166 +94,144 @@ export function Settings() {
           </nav>
         </div>
 
-        {/* Settings form */}
+        {/* Settings content */}
         <div class="lg:col-span-3">
-          {activeSection === 'server' && (
+          {activeSection === 'info' && (
             <div class="card space-y-6">
               <div>
-                <h2 class="text-base font-semibold text-text-primary mb-1">Server Configuration</h2>
-                <p class="text-sm text-text-muted">Core HTTP server settings</p>
-              </div>
-
-              <div class="space-y-5">
-                <div>
-                  <label class="block text-sm font-medium text-text-secondary mb-1.5">Listen Address</label>
-                  <input
-                    type="text"
-                    class="input w-full max-w-sm font-mono text-sm"
-                    value={config.listen_addr}
-                    onInput={(e) => setConfig({ ...config, listen_addr: (e.target as HTMLInputElement).value })}
-                  />
-                  <p class="text-xs text-text-muted mt-1">Host and port for the HTTP server (e.g. :8080, 0.0.0.0:8080)</p>
-                </div>
-
-                <div>
-                  <label class="block text-sm font-medium text-text-secondary mb-1.5">API Base Path</label>
-                  <input
-                    type="text"
-                    class="input w-full max-w-sm font-mono text-sm"
-                    value={config.base_path}
-                    onInput={(e) => setConfig({ ...config, base_path: (e.target as HTMLInputElement).value })}
-                  />
-                  <p class="text-xs text-text-muted mt-1">Prefix for all API routes</p>
-                </div>
-
-                <div>
-                  <label class="block text-sm font-medium text-text-secondary mb-1.5">CORS Origins</label>
-                  <input
-                    type="text"
-                    class="input w-full font-mono text-sm"
-                    placeholder="* or https://example.com,https://app.example.com"
-                    value={config.cors_origins}
-                    onInput={(e) => setConfig({ ...config, cors_origins: (e.target as HTMLInputElement).value })}
-                  />
-                  <p class="text-xs text-text-muted mt-1">Comma-separated allowed origins, or * for all</p>
-                </div>
-
-                <div>
-                  <label class="block text-sm font-medium text-text-secondary mb-1.5">Rate Limit</label>
-                  <div class="flex items-center gap-2">
-                    <input
-                      type="number"
-                      class="input w-32 font-mono text-sm"
-                      min="0"
-                      value={config.rate_limit}
-                      onInput={(e) => setConfig({ ...config, rate_limit: parseInt((e.target as HTMLInputElement).value) || 0 })}
-                    />
-                    <span class="text-sm text-text-muted">requests/minute per key</span>
-                  </div>
-                  <p class="text-xs text-text-muted mt-1">0 to disable rate limiting</p>
-                </div>
-
-                <div>
-                  <label class="block text-sm font-medium text-text-secondary mb-1.5">Log Level</label>
-                  <select
-                    class="input w-48"
-                    value={config.log_level}
-                    onChange={(e) => setConfig({ ...config, log_level: (e.target as HTMLSelectElement).value })}
-                  >
-                    <option value="debug">Debug</option>
-                    <option value="info">Info</option>
-                    <option value="warn">Warn</option>
-                    <option value="error">Error</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeSection === 'mcp' && (
-            <div class="card space-y-6">
-              <div>
-                <h2 class="text-base font-semibold text-text-primary mb-1">MCP Configuration</h2>
-                <p class="text-sm text-text-muted">Model Context Protocol server settings for AI agent access</p>
-              </div>
-
-              <div class="space-y-5">
-                <div class="flex items-center justify-between p-4 rounded-lg bg-surface border border-border-subtle">
-                  <div>
-                    <p class="text-sm font-medium text-text-primary">Enable MCP Server</p>
-                    <p class="text-xs text-text-muted mt-0.5">Expose database tools via Model Context Protocol</p>
-                  </div>
-                  <button
-                    onClick={() => setConfig({ ...config, mcp_enabled: !config.mcp_enabled })}
-                    class={`
-                      relative inline-flex h-6 w-11 items-center rounded-full transition-colors
-                      ${config.mcp_enabled ? 'bg-brand' : 'bg-surface-overlay border border-border-default'}
-                    `}
-                  >
-                    <span
-                      class={`
-                        inline-block h-4 w-4 rounded-full bg-white transition-transform
-                        ${config.mcp_enabled ? 'translate-x-6' : 'translate-x-1'}
-                      `}
-                    />
-                  </button>
-                </div>
-
-                {config.mcp_enabled && (
-                  <div>
-                    <label class="block text-sm font-medium text-text-secondary mb-1.5">Transport</label>
-                    <select
-                      class="input w-48"
-                      value={config.mcp_transport}
-                      onChange={(e) => setConfig({ ...config, mcp_transport: (e.target as HTMLSelectElement).value })}
-                    >
-                      <option value="stdio">stdio</option>
-                      <option value="sse">SSE (HTTP)</option>
-                    </select>
-                    <p class="text-xs text-text-muted mt-1">
-                      stdio for local tools (e.g. Claude Code), SSE for remote access
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeSection === 'admin' && (
-            <div class="card space-y-6">
-              <div>
-                <h2 class="text-base font-semibold text-text-primary mb-1">Admin Account</h2>
-                <p class="text-sm text-text-muted">Change the admin password</p>
+                <h2 class="text-base font-semibold text-text-primary mb-1">Server Information</h2>
+                <p class="text-sm text-text-muted">Current configuration and runtime details</p>
               </div>
 
               <div class="space-y-4">
-                <div>
-                  <label class="block text-sm font-medium text-text-secondary mb-1.5">Current Password</label>
-                  <input type="password" class="input w-full max-w-sm" placeholder="Enter current password" />
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div class="p-4 rounded-lg bg-surface border border-border-subtle">
+                    <p class="text-xs text-text-muted mb-1">API Base</p>
+                    <p class="text-sm font-mono text-text-primary">/api/v1</p>
+                  </div>
+                  <div class="p-4 rounded-lg bg-surface border border-border-subtle">
+                    <p class="text-xs text-text-muted mb-1">Health Endpoint</p>
+                    <p class="text-sm font-mono text-text-primary">/healthz</p>
+                  </div>
+                  <div class="p-4 rounded-lg bg-surface border border-border-subtle">
+                    <p class="text-xs text-text-muted mb-1">OpenAPI Spec</p>
+                    <a href="/openapi.json" target="_blank" class="text-sm font-mono text-brand hover:text-brand-light">/openapi.json</a>
+                  </div>
+                  <div class="p-4 rounded-lg bg-surface border border-border-subtle">
+                    <p class="text-xs text-text-muted mb-1">Authentication</p>
+                    <p class="text-sm font-mono text-text-primary">X-API-Key / Bearer JWT</p>
+                  </div>
                 </div>
-                <div>
-                  <label class="block text-sm font-medium text-text-secondary mb-1.5">New Password</label>
-                  <input type="password" class="input w-full max-w-sm" placeholder="Enter new password" />
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-text-secondary mb-1.5">Confirm New Password</label>
-                  <input type="password" class="input w-full max-w-sm" placeholder="Confirm new password" />
-                </div>
-                <div class="pt-2">
-                  <button class="btn-primary text-sm">Update Password</button>
+
+                <div class="p-4 rounded-lg bg-surface border border-border-subtle">
+                  <p class="text-xs text-text-muted mb-2">API Endpoints</p>
+                  <div class="space-y-1.5 font-mono text-xs">
+                    <div class="flex items-center gap-2">
+                      <span class="text-success font-semibold w-12">GET</span>
+                      <span class="text-text-secondary">/api/v1/{'{service}'}/_schema</span>
+                      <span class="text-text-muted ml-auto">List tables</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-success font-semibold w-12">GET</span>
+                      <span class="text-text-secondary">/api/v1/{'{service}'}/_table/{'{table}'}</span>
+                      <span class="text-text-muted ml-auto">Query records</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-brand font-semibold w-12">POST</span>
+                      <span class="text-text-secondary">/api/v1/{'{service}'}/_table/{'{table}'}</span>
+                      <span class="text-text-muted ml-auto">Create records</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-warning font-semibold w-12">PUT</span>
+                      <span class="text-text-secondary">/api/v1/{'{service}'}/_table/{'{table}'}</span>
+                      <span class="text-text-muted ml-auto">Replace records</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-error font-semibold w-12">DEL</span>
+                      <span class="text-text-secondary">/api/v1/{'{service}'}/_table/{'{table}'}</span>
+                      <span class="text-text-muted ml-auto">Delete records</span>
+                    </div>
+                  </div>
                 </div>
               </div>
+            </div>
+          )}
 
-              <div class="border-t border-border-subtle pt-6">
-                <h3 class="text-base font-semibold text-error mb-1">Danger Zone</h3>
-                <p class="text-sm text-text-muted mb-4">Irreversible actions</p>
-                <div class="flex items-center gap-4">
-                  <button class="btn-danger text-sm">
-                    Reset All Configuration
-                  </button>
-                  <button class="btn-danger text-sm">
-                    Purge All Data
-                  </button>
+          {activeSection === 'admins' && (
+            <div class="card space-y-6">
+              <div>
+                <h2 class="text-base font-semibold text-text-primary mb-1">Admin Accounts</h2>
+                <p class="text-sm text-text-muted">Manage administrator accounts</p>
+              </div>
+
+              <div class="overflow-x-auto rounded-lg border border-border-subtle">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="border-b border-border-subtle bg-surface">
+                      <th class="text-left px-4 py-3 font-medium text-text-secondary">Username</th>
+                      <th class="text-left px-4 py-3 font-medium text-text-secondary">Email</th>
+                      <th class="text-left px-4 py-3 font-medium text-text-secondary">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {admins.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} class="px-4 py-8 text-center text-text-muted">No admins found</td>
+                      </tr>
+                    ) : (
+                      admins.map((admin) => (
+                        <tr key={admin.id} class="border-b border-border-subtle last:border-0">
+                          <td class="px-4 py-3 font-medium text-text-primary">{admin.username}</td>
+                          <td class="px-4 py-3 text-text-secondary">{admin.email || '--'}</td>
+                          <td class="px-4 py-3 text-text-secondary text-xs">
+                            {admin.created_at ? new Date(admin.created_at).toLocaleDateString() : '--'}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeSection === 'about' && (
+            <div class="card space-y-6">
+              <div>
+                <h2 class="text-base font-semibold text-text-primary mb-1">About Faucet</h2>
+                <p class="text-sm text-text-muted">Open-source database-to-REST API generator</p>
+              </div>
+
+              <div class="space-y-4">
+                <div class="flex items-center gap-4 p-4 rounded-lg bg-surface border border-border-subtle">
+                  <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-brand to-cyan-accent flex items-center justify-center shrink-0">
+                    <svg class="w-6 h-6 text-white" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM14 11a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1h-1a1 1 0 110-2h1v-1a1 1 0 011-1z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p class="text-sm font-semibold text-text-primary">Faucet</p>
+                    <p class="text-xs text-text-muted">Turn any SQL database into a secure REST API. Single binary, zero configuration.</p>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                  <div class="p-3 rounded-lg bg-surface border border-border-subtle">
+                    <p class="text-xs text-text-muted mb-1">Built With</p>
+                    <p class="text-sm text-text-primary">Go + Chi + sqlx</p>
+                  </div>
+                  <div class="p-3 rounded-lg bg-surface border border-border-subtle">
+                    <p class="text-xs text-text-muted mb-1">Frontend</p>
+                    <p class="text-sm text-text-primary">Preact + Tailwind</p>
+                  </div>
+                  <div class="p-3 rounded-lg bg-surface border border-border-subtle">
+                    <p class="text-xs text-text-muted mb-1">Supported DBs</p>
+                    <p class="text-sm text-text-primary">PostgreSQL, MySQL, MSSQL, Snowflake</p>
+                  </div>
+                  <div class="p-3 rounded-lg bg-surface border border-border-subtle">
+                    <p class="text-xs text-text-muted mb-1">Features</p>
+                    <p class="text-sm text-text-primary">RBAC, MCP Server, OpenAPI</p>
+                  </div>
                 </div>
               </div>
             </div>

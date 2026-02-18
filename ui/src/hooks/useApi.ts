@@ -21,7 +21,7 @@ function getAuthHeaders(): Record<string, string> {
 
   const apiKey = localStorage.getItem('faucet_api_key');
   if (apiKey) {
-    headers['X-Faucet-Api-Key'] = apiKey;
+    headers['X-API-Key'] = apiKey;
   }
 
   const sessionToken = localStorage.getItem('faucet_session');

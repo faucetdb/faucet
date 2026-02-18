@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"github.com/faucetdb/faucet/internal/config"
+	"github.com/faucetdb/faucet/internal/model"
 )
 
 func newAdminCmd() *cobra.Command {
@@ -81,14 +85,28 @@ func runAdminCreate(email, password, name string) error {
 		return fmt.Errorf("password must be at least 8 characters")
 	}
 
-	// TODO: open config store, hash password with bcrypt, create admin
-	// store, _ := config.Open(...)
-	// hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	// admin := model.Admin{Email: email, PasswordHash: string(hash), Name: name, IsActive: true}
-	// err = store.CreateAdmin(admin)
+	store, err := openConfigStore()
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer store.Close()
 
-	fmt.Printf("Created admin user %q\n", email)
-	fmt.Println("  (placeholder: config store not yet wired)")
+	ctx := context.Background()
+
+	passwordHash := config.HashAPIKey(password)
+
+	admin := &model.Admin{
+		Email:        email,
+		PasswordHash: passwordHash,
+		Name:         name,
+		IsActive:     true,
+	}
+
+	if err := store.CreateAdmin(ctx, admin); err != nil {
+		return fmt.Errorf("create admin: %w", err)
+	}
+
+	fmt.Printf("Created admin user %q (id=%d)\n", email, admin.ID)
 	return nil
 }
 
@@ -112,22 +130,35 @@ func newAdminListCmd() *cobra.Command {
 }
 
 func runAdminList(jsonOutput bool) error {
-	// TODO: open config store, list admins
-	// store, _ := config.Open(...)
-	// admins, err := store.ListAdmins()
+	store, err := openConfigStore()
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer store.Close()
 
-	type adminRow struct {
-		Email  string `json:"email"`
-		Name   string `json:"name"`
-		Active bool   `json:"active"`
+	ctx := context.Background()
+	admins, err := store.ListAdmins(ctx)
+	if err != nil {
+		return fmt.Errorf("list admins: %w", err)
 	}
 
-	admins := []adminRow{} // empty until config store is wired
-
 	if jsonOutput {
+		type adminRow struct {
+			Email  string `json:"email"`
+			Name   string `json:"name"`
+			Active bool   `json:"active"`
+		}
+		rows := make([]adminRow, len(admins))
+		for i, a := range admins {
+			rows[i] = adminRow{
+				Email:  a.Email,
+				Name:   a.Name,
+				Active: a.IsActive,
+			}
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(admins)
+		return enc.Encode(rows)
 	}
 
 	if len(admins) == 0 {
@@ -139,7 +170,7 @@ func runAdminList(jsonOutput bool) error {
 	fmt.Printf("%-30s %-24s %-8s\n", "-----", "----", "------")
 	for _, a := range admins {
 		active := "yes"
-		if !a.Active {
+		if !a.IsActive {
 			active = "no"
 		}
 		fmt.Printf("%-30s %-24s %-8s\n", a.Email, a.Name, active)

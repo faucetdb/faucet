@@ -17,6 +17,7 @@ import (
 	"github.com/faucetdb/faucet/internal/connector/mysql"
 	"github.com/faucetdb/faucet/internal/connector/postgres"
 	"github.com/faucetdb/faucet/internal/connector/snowflake"
+	"github.com/faucetdb/faucet/internal/connector/sqlite"
 )
 
 func newBenchmarkCmd() *cobra.Command {
@@ -42,7 +43,7 @@ Executes concurrent SELECT queries against a specified table for the given durat
 		},
 	}
 
-	cmd.Flags().StringVar(&driver, "driver", "postgres", "Database driver (postgres, mysql, mssql, snowflake)")
+	cmd.Flags().StringVar(&driver, "driver", "postgres", "Database driver (postgres, mysql, mssql, snowflake, sqlite)")
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Connection string (required)")
 	cmd.Flags().DurationVar(&duration, "duration", 30*time.Second, "Test duration")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 10, "Number of concurrent workers")
@@ -129,8 +130,10 @@ func runBenchmark(driver, dsn string, duration time.Duration, concurrency int, t
 		conn = mssql.New()
 	case "snowflake":
 		conn = snowflake.New()
+	case "sqlite":
+		conn = sqlite.New()
 	default:
-		return fmt.Errorf("unsupported driver %q (supported: postgres, mysql, mssql, snowflake)", driver)
+		return fmt.Errorf("unsupported driver %q (supported: postgres, mysql, mssql, snowflake, sqlite)", driver)
 	}
 
 	// Connect

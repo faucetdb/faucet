@@ -50,3 +50,6 @@ benchmarks/results/*.json
 tmp/
 *.tmp
 *.log
+
+# Docs site (separate repo)
+docs-site/

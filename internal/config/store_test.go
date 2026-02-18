@@ -267,6 +267,170 @@ func TestAPIKeyCRUD(t *testing.T) {
 	}
 }
 
+func TestGetRoleByName(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Create a role with access rules.
+	role := &model.Role{
+		Name:        "editor",
+		Description: "Can edit things",
+		IsActive:    true,
+	}
+	if err := s.CreateRole(ctx, role); err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	// Set access rules so we can verify they're returned.
+	access := []model.RoleAccess{
+		{
+			ServiceName:   "mydb",
+			Component:     "_table/*",
+			VerbMask:      model.VerbGet | model.VerbPost,
+			RequestorMask: model.RequestorAPI,
+			Filters:       []model.Filter{},
+			FilterOp:      "AND",
+		},
+	}
+	if err := s.SetRoleAccess(ctx, role.ID, access); err != nil {
+		t.Fatalf("SetRoleAccess: %v", err)
+	}
+
+	// Get by name - should succeed.
+	got, err := s.GetRoleByName(ctx, "editor")
+	if err != nil {
+		t.Fatalf("GetRoleByName: %v", err)
+	}
+	if got.ID != role.ID {
+		t.Errorf("got ID %d, want %d", got.ID, role.ID)
+	}
+	if got.Name != "editor" {
+		t.Errorf("got name %q, want %q", got.Name, "editor")
+	}
+	if got.Description != "Can edit things" {
+		t.Errorf("got description %q, want %q", got.Description, "Can edit things")
+	}
+	if !got.IsActive {
+		t.Error("expected is_active = true")
+	}
+
+	// Verify access rules are loaded.
+	if len(got.Access) != 1 {
+		t.Fatalf("got %d access rules, want 1", len(got.Access))
+	}
+	if got.Access[0].ServiceName != "mydb" {
+		t.Errorf("access[0].ServiceName = %q, want %q", got.Access[0].ServiceName, "mydb")
+	}
+	if got.Access[0].VerbMask != model.VerbGet|model.VerbPost {
+		t.Errorf("access[0].VerbMask = %d, want %d", got.Access[0].VerbMask, model.VerbGet|model.VerbPost)
+	}
+
+	// Get by name - not found.
+	_, err = s.GetRoleByName(ctx, "nonexistent")
+	if err != ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestRevokeAPIKeyByPrefix(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Need a role first.
+	role := &model.Role{Name: "prefixtest", IsActive: true}
+	if err := s.CreateRole(ctx, role); err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	rawKey := "faucet_prefixtest_key_abcdef1234"
+	hash := HashAPIKey(rawKey)
+	prefix := rawKey[:15]
+
+	key := &model.APIKey{
+		KeyHash:   hash,
+		KeyPrefix: prefix,
+		Label:     "Prefix Test Key",
+		RoleID:    role.ID,
+		IsActive:  true,
+	}
+	if err := s.CreateAPIKey(ctx, key); err != nil {
+		t.Fatalf("CreateAPIKey: %v", err)
+	}
+
+	// Revoke by prefix - should succeed.
+	if err := s.RevokeAPIKeyByPrefix(ctx, prefix); err != nil {
+		t.Fatalf("RevokeAPIKeyByPrefix: %v", err)
+	}
+
+	// Verify the key is now inactive.
+	got, err := s.GetAPIKeyByHash(ctx, hash)
+	if err != nil {
+		t.Fatalf("GetAPIKeyByHash: %v", err)
+	}
+	if got.IsActive {
+		t.Error("expected key to be revoked (inactive)")
+	}
+
+	// Revoking again should return ErrNotFound (already inactive).
+	err = s.RevokeAPIKeyByPrefix(ctx, prefix)
+	if err != ErrNotFound {
+		t.Errorf("expected ErrNotFound on second revoke, got %v", err)
+	}
+
+	// Revoking a nonexistent prefix should return ErrNotFound.
+	err = s.RevokeAPIKeyByPrefix(ctx, "nonexistent_pfx")
+	if err != ErrNotFound {
+		t.Errorf("expected ErrNotFound for unknown prefix, got %v", err)
+	}
+}
+
+func TestRevokeAPIKeyByPrefix_MultipleKeys(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	role := &model.Role{Name: "multipfx", IsActive: true}
+	if err := s.CreateRole(ctx, role); err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	// Create two keys with different prefixes.
+	key1 := &model.APIKey{
+		KeyHash:   HashAPIKey("faucet_key1_xxxxxxxxxx"),
+		KeyPrefix: "faucet_key1_xxx",
+		Label:     "Key 1",
+		RoleID:    role.ID,
+		IsActive:  true,
+	}
+	key2 := &model.APIKey{
+		KeyHash:   HashAPIKey("faucet_key2_yyyyyyyyyy"),
+		KeyPrefix: "faucet_key2_yyy",
+		Label:     "Key 2",
+		RoleID:    role.ID,
+		IsActive:  true,
+	}
+	if err := s.CreateAPIKey(ctx, key1); err != nil {
+		t.Fatalf("CreateAPIKey key1: %v", err)
+	}
+	if err := s.CreateAPIKey(ctx, key2); err != nil {
+		t.Fatalf("CreateAPIKey key2: %v", err)
+	}
+
+	// Revoke key1 by prefix - key2 should remain active.
+	if err := s.RevokeAPIKeyByPrefix(ctx, "faucet_key1_xxx"); err != nil {
+		t.Fatalf("RevokeAPIKeyByPrefix: %v", err)
+	}
+
+	got1, _ := s.GetAPIKeyByHash(ctx, key1.KeyHash)
+	if got1.IsActive {
+		t.Error("key1 should be inactive")
+	}
+
+	got2, _ := s.GetAPIKeyByHash(ctx, key2.KeyHash)
+	if !got2.IsActive {
+		t.Error("key2 should still be active")
+	}
+}
+
 func TestHashAPIKey(t *testing.T) {
 	hash1 := HashAPIKey("test-key-123")
 	hash2 := HashAPIKey("test-key-123")

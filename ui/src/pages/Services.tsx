@@ -4,46 +4,37 @@ import { StatusBadge } from '../components/StatusBadge';
 import { apiFetch } from '../hooks/useApi';
 
 interface Service {
-  id: string;
   name: string;
-  type: string;
-  host: string;
-  port: number;
-  database: string;
-  username: string;
-  status: 'healthy' | 'degraded' | 'error' | 'unknown';
-  tables: number;
+  driver: string;
+  dsn: string;
+  schema: string;
+  active: boolean;
   created_at: string;
 }
 
-const DB_TYPES = [
-  { value: 'postgres', label: 'PostgreSQL', port: 5432 },
-  { value: 'mysql', label: 'MySQL', port: 3306 },
-  { value: 'mssql', label: 'SQL Server', port: 1433 },
-  { value: 'snowflake', label: 'Snowflake', port: 443 },
+const DB_DRIVERS = [
+  { value: 'postgres', label: 'PostgreSQL' },
+  { value: 'mysql', label: 'MySQL' },
+  { value: 'mssql', label: 'SQL Server' },
+  { value: 'snowflake', label: 'Snowflake' },
 ];
 
 const emptyForm = {
   name: '',
-  type: 'postgres',
-  host: 'localhost',
-  port: 5432,
-  database: '',
-  username: '',
-  password: '',
-  options: '',
+  driver: 'postgres',
+  dsn: '',
+  schema: '',
 };
 
 export function Services() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...emptyForm });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string }>>({});
 
   useEffect(() => {
     loadServices();
@@ -52,7 +43,7 @@ export function Services() {
   async function loadServices() {
     setLoading(true);
     try {
-      const res = await apiFetch('/api/v1/services');
+      const res = await apiFetch('/api/v1/system/service');
       setServices(res.resource || []);
     } catch {
       setServices([]);
@@ -63,52 +54,26 @@ export function Services() {
 
   function openNew() {
     setForm({ ...emptyForm });
-    setEditId(null);
     setError(null);
-    setTestResult(null);
     setShowModal(true);
   }
 
-  function openEdit(svc: Service) {
-    setForm({
-      name: svc.name,
-      type: svc.type,
-      host: svc.host,
-      port: svc.port,
-      database: svc.database,
-      username: svc.username,
-      password: '',
-      options: '',
-    });
-    setEditId(svc.id);
-    setError(null);
-    setTestResult(null);
-    setShowModal(true);
-  }
-
-  async function handleTest() {
-    setTesting(true);
-    setTestResult(null);
+  async function handleTestConnection(serviceName: string) {
+    setTesting(serviceName);
     try {
-      const res = await apiFetch('/api/v1/services/test', {
-        method: 'POST',
-        body: {
-          type: form.type,
-          host: form.host,
-          port: form.port,
-          database: form.database,
-          username: form.username,
-          password: form.password,
+      // Test by fetching the schema - if the connection is working, this should succeed
+      await apiFetch(`/api/v1/${serviceName}/_schema`);
+      setTestResults({ ...testResults, [serviceName]: { ok: true, message: 'Connection successful' } });
+    } catch (err) {
+      setTestResults({
+        ...testResults,
+        [serviceName]: {
+          ok: false,
+          message: err instanceof Error ? err.message : 'Connection failed',
         },
       });
-      setTestResult({ ok: true, message: res.message || 'Connection successful' });
-    } catch (err) {
-      setTestResult({
-        ok: false,
-        message: err instanceof Error ? err.message : 'Connection failed',
-      });
     } finally {
-      setTesting(false);
+      setTesting(null);
     }
   }
 
@@ -116,23 +81,16 @@ export function Services() {
     setSaving(true);
     setError(null);
     try {
-      const body = {
+      const body: Record<string, any> = {
         name: form.name,
-        type: form.type,
-        host: form.host,
-        port: form.port,
-        database: form.database,
-        username: form.username,
-        password: form.password || undefined,
-        options: form.options || undefined,
+        driver: form.driver,
+        dsn: form.dsn,
       };
-
-      if (editId) {
-        await apiFetch(`/api/v1/services/${editId}`, { method: 'PUT', body });
-      } else {
-        await apiFetch('/api/v1/services', { method: 'POST', body });
+      if (form.schema) {
+        body.schema = form.schema;
       }
 
+      await apiFetch('/api/v1/system/service', { method: 'POST', body });
       setShowModal(false);
       loadServices();
     } catch (err) {
@@ -142,23 +100,29 @@ export function Services() {
     }
   }
 
-  async function handleDelete(id: string, name: string) {
+  async function handleDelete(name: string) {
     if (!confirm(`Delete service "${name}"? This cannot be undone.`)) return;
     try {
-      await apiFetch(`/api/v1/services/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/v1/system/service/${name}`, { method: 'DELETE' });
       loadServices();
     } catch {
       // ignore
     }
   }
 
-  function handleTypeChange(type: string) {
-    const dbType = DB_TYPES.find((t) => t.value === type);
-    setForm({
-      ...form,
-      type,
-      port: dbType?.port || form.port,
-    });
+  function dsnPlaceholder(driver: string): string {
+    switch (driver) {
+      case 'postgres':
+        return 'postgres://user:pass@localhost:5432/dbname?sslmode=disable';
+      case 'mysql':
+        return 'user:pass@tcp(localhost:3306)/dbname';
+      case 'mssql':
+        return 'sqlserver://user:pass@localhost:1433?database=dbname';
+      case 'snowflake':
+        return 'user:pass@account/dbname/schema?warehouse=wh';
+      default:
+        return '';
+    }
   }
 
   return (
@@ -204,41 +168,46 @@ export function Services() {
       ) : (
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {services.map((svc) => (
-            <div key={svc.id} class="card group hover:border-border-default transition-colors">
+            <div key={svc.name} class="card group hover:border-border-default transition-colors">
               <div class="flex items-start justify-between mb-3">
                 <div class="flex items-center gap-3">
                   <div class="w-10 h-10 rounded-lg bg-brand/10 flex items-center justify-center shrink-0">
-                    <span class="text-sm font-bold text-brand uppercase">{svc.type.slice(0, 2)}</span>
+                    <span class="text-sm font-bold text-brand uppercase">{svc.driver.slice(0, 2)}</span>
                   </div>
                   <div>
                     <h3 class="text-sm font-semibold text-text-primary">{svc.name}</h3>
-                    <p class="text-xs text-text-muted">{svc.type}</p>
+                    <p class="text-xs text-text-muted">{svc.driver}</p>
                   </div>
                 </div>
-                <StatusBadge status={svc.status} />
+                <StatusBadge status={svc.active ? 'active' : 'inactive'} />
               </div>
 
-              <div class="space-y-1.5 text-xs font-mono text-text-secondary mb-4">
-                <div class="flex items-center gap-2">
-                  <span class="text-text-muted">host:</span>
-                  <span>{svc.host}:{svc.port}</span>
+              {svc.schema && (
+                <div class="text-xs font-mono text-text-secondary mb-3">
+                  <span class="text-text-muted">schema:</span> {svc.schema}
                 </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-text-muted">db:</span>
-                  <span>{svc.database}</span>
+              )}
+
+              {/* Test result */}
+              {testResults[svc.name] && (
+                <div
+                  class={`text-xs p-2 rounded mb-3 ${
+                    testResults[svc.name].ok
+                      ? 'bg-success/10 text-success'
+                      : 'bg-error/10 text-error'
+                  }`}
+                >
+                  {testResults[svc.name].message}
                 </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-text-muted">tables:</span>
-                  <span>{svc.tables}</span>
-                </div>
-              </div>
+              )}
 
               <div class="flex items-center gap-2 pt-3 border-t border-border-subtle">
                 <button
-                  onClick={() => openEdit(svc)}
+                  onClick={() => handleTestConnection(svc.name)}
+                  disabled={testing === svc.name}
                   class="btn-ghost text-xs py-1.5 px-3"
                 >
-                  Edit
+                  {testing === svc.name ? 'Testing...' : 'Test'}
                 </button>
                 <a
                   href={`/schema?service=${svc.name}`}
@@ -247,7 +216,7 @@ export function Services() {
                   Schema
                 </a>
                 <button
-                  onClick={() => handleDelete(svc.id, svc.name)}
+                  onClick={() => handleDelete(svc.name)}
                   class="btn-ghost text-xs py-1.5 px-3 text-error hover:text-error ml-auto"
                 >
                   Delete
@@ -258,11 +227,11 @@ export function Services() {
         </div>
       )}
 
-      {/* Add/Edit Modal */}
+      {/* Add Modal */}
       <Modal
         isOpen={showModal}
         onClose={() => setShowModal(false)}
-        title={editId ? 'Edit Service' : 'Add Service'}
+        title="Add Service"
         width="max-w-xl"
       >
         <div class="space-y-4">
@@ -272,136 +241,80 @@ export function Services() {
             </div>
           )}
 
-          <div class="grid grid-cols-2 gap-4">
-            <div class="col-span-2">
-              <label class="block text-sm font-medium text-text-secondary mb-1.5">Service Name</label>
-              <input
-                type="text"
-                class="input w-full"
-                placeholder="my-database"
-                value={form.name}
-                onInput={(e) => setForm({ ...form, name: (e.target as HTMLInputElement).value })}
-              />
-            </div>
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-1.5">Service Name</label>
+            <input
+              type="text"
+              class="input w-full"
+              placeholder="my-database"
+              value={form.name}
+              onInput={(e) => setForm({ ...form, name: (e.target as HTMLInputElement).value })}
+            />
+            <p class="text-xs text-text-muted mt-1">Unique identifier used in API URLs (e.g. /api/v1/my-database/_table/...)</p>
+          </div>
 
-            <div class="col-span-2">
-              <label class="block text-sm font-medium text-text-secondary mb-1.5">Database Type</label>
-              <select
-                class="input w-full"
-                value={form.type}
-                onChange={(e) => handleTypeChange((e.target as HTMLSelectElement).value)}
-              >
-                {DB_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-text-secondary mb-1.5">Host</label>
-              <input
-                type="text"
-                class="input w-full font-mono text-sm"
-                placeholder="localhost"
-                value={form.host}
-                onInput={(e) => setForm({ ...form, host: (e.target as HTMLInputElement).value })}
-              />
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-text-secondary mb-1.5">Port</label>
-              <input
-                type="number"
-                class="input w-full font-mono text-sm"
-                value={form.port}
-                onInput={(e) => setForm({ ...form, port: parseInt((e.target as HTMLInputElement).value) || 0 })}
-              />
-            </div>
-
-            <div class="col-span-2">
-              <label class="block text-sm font-medium text-text-secondary mb-1.5">Database Name</label>
-              <input
-                type="text"
-                class="input w-full font-mono text-sm"
-                placeholder="mydb"
-                value={form.database}
-                onInput={(e) => setForm({ ...form, database: (e.target as HTMLInputElement).value })}
-              />
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-text-secondary mb-1.5">Username</label>
-              <input
-                type="text"
-                class="input w-full font-mono text-sm"
-                placeholder="postgres"
-                value={form.username}
-                onInput={(e) => setForm({ ...form, username: (e.target as HTMLInputElement).value })}
-              />
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-text-secondary mb-1.5">Password</label>
-              <input
-                type="password"
-                class="input w-full font-mono text-sm"
-                placeholder={editId ? '(unchanged)' : ''}
-                value={form.password}
-                onInput={(e) => setForm({ ...form, password: (e.target as HTMLInputElement).value })}
-              />
-            </div>
-
-            <div class="col-span-2">
-              <label class="block text-sm font-medium text-text-secondary mb-1.5">
-                Connection Options <span class="text-text-muted font-normal">(optional)</span>
-              </label>
-              <input
-                type="text"
-                class="input w-full font-mono text-sm"
-                placeholder="sslmode=require"
-                value={form.options}
-                onInput={(e) => setForm({ ...form, options: (e.target as HTMLInputElement).value })}
-              />
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-1.5">Database Driver</label>
+            <div class="grid grid-cols-2 gap-2">
+              {DB_DRIVERS.map((d) => (
+                <button
+                  key={d.value}
+                  onClick={() => setForm({ ...form, driver: d.value })}
+                  class={`
+                    p-3 rounded-lg border text-left text-sm font-medium transition-colors
+                    ${form.driver === d.value
+                      ? 'border-brand bg-brand/10 text-brand'
+                      : 'border-border-default bg-surface hover:bg-surface-overlay text-text-secondary'
+                    }
+                  `}
+                >
+                  {d.label}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Test result */}
-          {testResult && (
-            <div
-              class={`p-3 rounded-lg text-sm ${
-                testResult.ok
-                  ? 'bg-success/10 border border-success/20 text-success'
-                  : 'bg-error/10 border border-error/20 text-error'
-              }`}
-            >
-              {testResult.message}
-            </div>
-          )}
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-1.5">DSN (Connection String)</label>
+            <input
+              type="text"
+              class="input w-full font-mono text-sm"
+              placeholder={dsnPlaceholder(form.driver)}
+              value={form.dsn}
+              onInput={(e) => setForm({ ...form, dsn: (e.target as HTMLInputElement).value })}
+            />
+            <p class="text-xs text-text-muted mt-1">Full connection string for the database</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-1.5">
+              Schema <span class="text-text-muted font-normal">(optional)</span>
+            </label>
+            <input
+              type="text"
+              class="input w-full font-mono text-sm"
+              placeholder="public"
+              value={form.schema}
+              onInput={(e) => setForm({ ...form, schema: (e.target as HTMLInputElement).value })}
+            />
+            <p class="text-xs text-text-muted mt-1">Database schema to use (defaults to driver default)</p>
+          </div>
 
           {/* Actions */}
-          <div class="flex items-center justify-between pt-4 border-t border-border-subtle">
+          <div class="flex items-center justify-end gap-2 pt-4 border-t border-border-subtle">
             <button
-              onClick={handleTest}
-              disabled={testing}
-              class="btn-secondary text-sm"
+              onClick={() => setShowModal(false)}
+              class="btn-ghost text-sm"
             >
-              {testing ? 'Testing...' : 'Test Connection'}
+              Cancel
             </button>
-            <div class="flex items-center gap-2">
-              <button
-                onClick={() => setShowModal(false)}
-                class="btn-ghost text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving || !form.name || !form.database}
-                class="btn-primary text-sm"
-              >
-                {saving ? 'Saving...' : editId ? 'Update Service' : 'Add Service'}
-              </button>
-            </div>
+            <button
+              onClick={handleSave}
+              disabled={saving || !form.name || !form.dsn}
+              class="btn-primary text-sm"
+            >
+              {saving ? 'Saving...' : 'Add Service'}
+            </button>
           </div>
         </div>
       </Modal>

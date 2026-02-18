@@ -191,6 +191,7 @@ faucet serve --data-dir /var/lib/faucet
 | MySQL      | `mysql`     | Full support |
 | SQL Server | `mssql`     | Full support |
 | Snowflake  | `snowflake` | Full support |
+| SQLite     | `sqlite`    | Full support |
 
 ## What's Next
 
@@ -201,3 +202,5 @@ faucet serve --data-dir /var/lib/faucet
 - [RBAC](rbac.md) -- roles, API keys, and access control
 - [MCP Server](mcp-server.md) -- AI agent integration
 - [Deployment](deployment.md) -- production deployment guide
+- [Snowflake Tutorial](tutorial-snowflake.md) -- connect and query Snowflake
+- [SQLite Tutorial](tutorial-sqlite.md) -- connect and query SQLite databases

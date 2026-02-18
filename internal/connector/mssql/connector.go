@@ -26,7 +26,7 @@ func New() connector.Connector {
 // provided configuration. It configures connection pool settings and stores
 // the schema name for introspection queries.
 func (c *MSSQLConnector) Connect(cfg connector.ConnectionConfig) error {
-	db, err := sqlx.Connect("mssql", cfg.DSN)
+	db, err := sqlx.Connect("sqlserver", cfg.DSN)
 	if err != nil {
 		return fmt.Errorf("mssql connect: %w", err)
 	}

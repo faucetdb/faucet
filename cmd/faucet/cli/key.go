@@ -1,11 +1,18 @@
 package cli
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/faucetdb/faucet/internal/config"
+	"github.com/faucetdb/faucet/internal/model"
 )
 
 func newKeyCmd() *cobra.Command {
@@ -49,26 +56,66 @@ func newKeyCreateCmd() *cobra.Command {
 	return cmd
 }
 
-func runKeyCreate(role, label string) error {
-	// TODO: open config store, look up role by name, generate key, store hash
-	// store, _ := config.Open(...)
-	// roleObj, err := store.GetRoleByName(role)
-	// rawKey := crypto.GenerateAPIKey()
-	// hash := sha256hex(rawKey)
-	// prefix := rawKey[:8]
-	// apiKey := model.APIKey{KeyHash: hash, KeyPrefix: prefix, Label: label, RoleID: roleObj.ID, IsActive: true}
-	// store.CreateAPIKey(apiKey)
+func runKeyCreate(roleName, label string) error {
+	store, err := openConfigStore()
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Look up role by name (iterate all roles since store has no GetRoleByName)
+	roles, err := store.ListRoles(ctx)
+	if err != nil {
+		return fmt.Errorf("list roles: %w", err)
+	}
+
+	var matchedRole *model.Role
+	for i := range roles {
+		if roles[i].Name == roleName {
+			matchedRole = &roles[i]
+			break
+		}
+	}
+	if matchedRole == nil {
+		return fmt.Errorf("role %q not found", roleName)
+	}
+
+	// Generate 32 random bytes, hex encode, prefix with "faucet_"
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return fmt.Errorf("generate random key: %w", err)
+	}
+	rawKey := "faucet_" + hex.EncodeToString(randomBytes)
+
+	// Hash the key for storage
+	keyHash := config.HashAPIKey(rawKey)
+
+	// Use first 15 chars as prefix (faucet_ + 8 hex chars)
+	keyPrefix := rawKey[:15]
+
+	apiKey := &model.APIKey{
+		KeyHash:  keyHash,
+		KeyPrefix: keyPrefix,
+		Label:    label,
+		RoleID:   matchedRole.ID,
+		IsActive: true,
+	}
+
+	if err := store.CreateAPIKey(ctx, apiKey); err != nil {
+		return fmt.Errorf("create api key: %w", err)
+	}
 
 	fmt.Println("API Key created:")
 	fmt.Println()
-	fmt.Printf("  Key:   faucet_%s... (placeholder)\n", "xxxxxxxxxxxx")
-	fmt.Printf("  Role:  %s\n", role)
+	fmt.Printf("  Key:   %s\n", rawKey)
+	fmt.Printf("  Role:  %s\n", roleName)
 	if label != "" {
 		fmt.Printf("  Label: %s\n", label)
 	}
 	fmt.Println()
 	fmt.Println("  Save this key now - it cannot be retrieved again.")
-	fmt.Println("  (placeholder: config store not yet wired)")
 	return nil
 }
 
@@ -92,9 +139,28 @@ func newKeyListCmd() *cobra.Command {
 }
 
 func runKeyList(jsonOutput bool) error {
-	// TODO: open config store, list keys
-	// store, _ := config.Open(...)
-	// keys, err := store.ListAPIKeys()
+	store, err := openConfigStore()
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	keys, err := store.ListAPIKeys(ctx)
+	if err != nil {
+		return fmt.Errorf("list api keys: %w", err)
+	}
+
+	// Build a role ID -> name map for display
+	roles, err := store.ListRoles(ctx)
+	if err != nil {
+		return fmt.Errorf("list roles: %w", err)
+	}
+	roleNames := make(map[int64]string, len(roles))
+	for _, r := range roles {
+		roleNames[r.ID] = r.Name
+	}
 
 	type keyRow struct {
 		Prefix string `json:"prefix"`
@@ -103,27 +169,39 @@ func runKeyList(jsonOutput bool) error {
 		Active bool   `json:"active"`
 	}
 
-	keys := []keyRow{} // empty until config store is wired
+	rows := make([]keyRow, len(keys))
+	for i, k := range keys {
+		rn := roleNames[k.RoleID]
+		if rn == "" {
+			rn = fmt.Sprintf("role:%d", k.RoleID)
+		}
+		rows[i] = keyRow{
+			Prefix: k.KeyPrefix,
+			Role:   rn,
+			Label:  k.Label,
+			Active: k.IsActive,
+		}
+	}
 
 	if jsonOutput {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(keys)
+		return enc.Encode(rows)
 	}
 
-	if len(keys) == 0 {
+	if len(rows) == 0 {
 		fmt.Println("No API keys configured. Use 'faucet key create' to create one.")
 		return nil
 	}
 
-	fmt.Printf("%-12s %-16s %-24s %-8s\n", "PREFIX", "ROLE", "LABEL", "ACTIVE")
-	fmt.Printf("%-12s %-16s %-24s %-8s\n", "------", "----", "-----", "------")
-	for _, k := range keys {
+	fmt.Printf("%-16s %-16s %-24s %-8s\n", "PREFIX", "ROLE", "LABEL", "ACTIVE")
+	fmt.Printf("%-16s %-16s %-24s %-8s\n", "------", "----", "-----", "------")
+	for _, k := range rows {
 		active := "yes"
 		if !k.Active {
 			active = "no"
 		}
-		fmt.Printf("%-12s %-16s %-24s %-8s\n", k.Prefix, k.Role, k.Label, active)
+		fmt.Printf("%-16s %-16s %-24s %-8s\n", k.Prefix, k.Role, k.Label, active)
 	}
 
 	return nil
@@ -146,11 +224,35 @@ func newKeyRevokeCmd() *cobra.Command {
 }
 
 func runKeyRevoke(prefix string) error {
-	// TODO: open config store, find key by prefix, set is_active = false
-	// store, _ := config.Open(...)
-	// err := store.RevokeAPIKey(prefix)
+	store, err := openConfigStore()
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer store.Close()
 
-	fmt.Printf("Revoked API key with prefix %q\n", prefix)
-	fmt.Println("  (placeholder: config store not yet wired)")
+	ctx := context.Background()
+
+	keys, err := store.ListAPIKeys(ctx)
+	if err != nil {
+		return fmt.Errorf("list api keys: %w", err)
+	}
+
+	// Find key whose prefix starts with the given prefix
+	var matchedKey *model.APIKey
+	for i := range keys {
+		if strings.HasPrefix(keys[i].KeyPrefix, prefix) || keys[i].KeyPrefix == prefix {
+			matchedKey = &keys[i]
+			break
+		}
+	}
+	if matchedKey == nil {
+		return fmt.Errorf("no API key found with prefix %q", prefix)
+	}
+
+	if err := store.RevokeAPIKey(ctx, matchedKey.ID); err != nil {
+		return fmt.Errorf("revoke api key: %w", err)
+	}
+
+	fmt.Printf("Revoked API key with prefix %q\n", matchedKey.KeyPrefix)
 	return nil
 }

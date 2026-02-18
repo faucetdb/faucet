@@ -28,11 +28,10 @@ const banner = `
 
 func newServeCmd() *cobra.Command {
 	var (
-		port    int
-		host    string
-		noUI    bool
-		dev     bool
-		dataDir string
+		port int
+		host string
+		noUI bool
+		dev  bool
 	)
 
 	cmd := &cobra.Command{
@@ -48,7 +47,6 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "0.0.0.0", "HTTP listen host")
 	cmd.Flags().BoolVar(&noUI, "no-ui", false, "Disable the admin UI")
 	cmd.Flags().BoolVar(&dev, "dev", false, "Enable development mode (verbose logging, CORS *)")
-	cmd.Flags().StringVar(&dataDir, "data-dir", "", "Data directory for SQLite config (default: ~/.faucet)")
 
 	viper.BindPFlag("server.port", cmd.Flags().Lookup("port"))
 	viper.BindPFlag("server.host", cmd.Flags().Lookup("host"))
@@ -99,6 +97,7 @@ func runServe(host string, port int, noUI, dev bool, dataDir string) error {
 		cfg := connector.ConnectionConfig{
 			Driver:          svc.Driver,
 			DSN:             svc.DSN,
+			PrivateKeyPath:  svc.PrivateKeyPath,
 			SchemaName:      svc.Schema,
 			MaxOpenConns:    svc.Pool.MaxOpenConns,
 			MaxIdleConns:    svc.Pool.MaxIdleConns,

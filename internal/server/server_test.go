@@ -186,10 +186,18 @@ func TestReadyz(t *testing.T) {
 	assertStatus(t, rr, http.StatusOK)
 	assertContentType(t, rr, "application/json")
 
-	var resp map[string]string
+	var resp map[string]interface{}
 	decodeJSON(t, rr, &resp)
 	if resp["status"] != "ok" {
 		t.Errorf("status = %q, want %q", resp["status"], "ok")
+	}
+	// With no active connectors, checks should be an empty map.
+	checks, ok := resp["checks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected checks to be a map")
+	}
+	if len(checks) != 0 {
+		t.Errorf("expected 0 checks with no connectors, got %d", len(checks))
 	}
 }
 

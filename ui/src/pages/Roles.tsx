@@ -57,7 +57,7 @@ export function Roles() {
   async function loadRoles() {
     setLoading(true);
     try {
-      const res = await apiFetch('/api/v1/system/roles');
+      const res = await apiFetch('/api/v1/system/role');
       setRoles(res.resource || []);
     } catch {
       setRoles([]);
@@ -95,9 +95,9 @@ export function Roles() {
     setError(null);
     try {
       if (editId) {
-        await apiFetch(`/api/v1/system/roles/${editId}`, { method: 'PUT', body: form });
+        await apiFetch(`/api/v1/system/role/${editId}`, { method: 'PUT', body: form });
       } else {
-        await apiFetch('/api/v1/system/roles', { method: 'POST', body: form });
+        await apiFetch('/api/v1/system/role', { method: 'POST', body: form });
       }
       setShowModal(false);
       loadRoles();
@@ -111,7 +111,7 @@ export function Roles() {
   async function handleDelete(id: string, name: string) {
     if (!confirm(`Delete role "${name}"?`)) return;
     try {
-      await apiFetch(`/api/v1/system/roles/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/v1/system/role/${id}`, { method: 'DELETE' });
       loadRoles();
     } catch {
       // ignore

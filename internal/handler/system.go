@@ -234,6 +234,9 @@ func (h *SystemHandler) UpdateService(w http.ResponseWriter, r *http.Request) {
 	if updates.DSN != "" {
 		existing.DSN = updates.DSN
 	}
+	if updates.PrivateKeyPath != "" {
+		existing.PrivateKeyPath = updates.PrivateKeyPath
+	}
 	if updates.Schema != "" {
 		existing.Schema = updates.Schema
 	}
@@ -651,7 +654,7 @@ func (h *SystemHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func serviceToMap(svc *model.ServiceConfig) map[string]interface{} {
-	return map[string]interface{}{
+	m := map[string]interface{}{
 		"id":              svc.ID,
 		"name":            svc.Name,
 		"label":           svc.Label,
@@ -663,6 +666,10 @@ func serviceToMap(svc *model.ServiceConfig) map[string]interface{} {
 		"created_at":      svc.CreatedAt,
 		"updated_at":      svc.UpdatedAt,
 	}
+	if svc.PrivateKeyPath != "" {
+		m["private_key_path"] = svc.PrivateKeyPath
+	}
+	return m
 }
 
 func roleToMap(role *model.Role) map[string]interface{} {

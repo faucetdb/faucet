@@ -1,0 +1,60 @@
+# Docker Compose example: Faucet with PostgreSQL and MySQL
+#
+# Usage:
+#   docker compose up -d
+#   Open http://localhost:8080 for the admin UI
+
+services:
+  faucet:
+    image: faucetdb/faucet:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - faucet-data:/data
+    environment:
+      FAUCET_JWT_SECRET: change-me-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: faucet
+      POSTGRES_PASSWORD: faucet
+      POSTGRES_DB: demo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./seed-postgres.sql:/docker-entrypoint-initdb.d/seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U faucet"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: demo
+      MYSQL_USER: faucet
+      MYSQL_PASSWORD: faucet
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./seed-mysql.sql:/docker-entrypoint-initdb.d/seed.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  faucet-data:
+  pg-data:
+  mysql-data:

@@ -27,6 +27,7 @@ and a built-in MCP server for AI agents.`,
 	}
 
 	cmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./faucet.yaml)")
+	cmd.PersistentFlags().StringVar(&dataDir, "data-dir", "", "data directory for SQLite config (default: ~/.faucet)")
 
 	cobra.OnInitialize(initConfig)
 

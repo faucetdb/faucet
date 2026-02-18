@@ -54,7 +54,7 @@ faucet serve --host 127.0.0.1 --port 8080
 
 **On startup, the server:**
 1. Initializes the SQLite config store at the data directory
-2. Registers database drivers (postgres, mysql, mssql, snowflake)
+2. Registers database drivers (postgres, mysql, mssql, snowflake, sqlite)
 3. Connects all active database services from the config
 4. Initializes the authentication service
 5. Starts the HTTP server with all routes and middleware

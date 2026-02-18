@@ -8,9 +8,10 @@ type ServiceConfig struct {
 	ID        int64      `json:"id" db:"id"`
 	Name      string     `json:"name" db:"name"`
 	Label     string     `json:"label" db:"label"`
-	Driver    string     `json:"driver" db:"driver"` // postgres, mysql, mssql, snowflake
-	DSN       string     `json:"dsn,omitempty" db:"dsn"` // Accepted on input; omitted in list responses via serviceToMap
-	Schema    string     `json:"schema" db:"schema_name"`
+	Driver    string     `json:"driver" db:"driver"` // postgres, mysql, mssql, snowflake, sqlite
+	DSN            string `json:"dsn,omitempty" db:"dsn"` // Accepted on input; omitted in list responses via serviceToMap
+	PrivateKeyPath string `json:"private_key_path,omitempty" db:"private_key_path"`
+	Schema         string `json:"schema" db:"schema_name"`
 	ReadOnly  bool       `json:"read_only" db:"read_only"`
 	RawSQL    bool       `json:"raw_sql_allowed" db:"raw_sql_allowed"`
 	IsActive  bool       `json:"is_active" db:"is_active"`

@@ -1,6 +1,6 @@
 # Database Connectors
 
-Faucet supports four SQL databases. Each database is connected as a **service** -- a named reference to a single database that becomes an API namespace.
+Faucet supports five SQL databases. Each database is connected as a **service** -- a named reference to a single database that becomes an API namespace.
 
 All connectors implement the same `Connector` interface, which provides:
 
@@ -226,14 +226,14 @@ username:password@account_identifier/database/schema?warehouse=wh&role=role
 | `warehouse` | -- | Snowflake warehouse |
 | `role` | -- | Snowflake role |
 | `schema` | `PUBLIC` | Default schema |
-| `authenticator` | -- | Auth type: `snowflake` (default), `externalbrowser`, `oauth` |
+| `authenticator` | -- | Auth type: `snowflake` (default), `externalbrowser`, `oauth`, `SNOWFLAKE_JWT` |
 | `token` | -- | OAuth access token (when authenticator=oauth) |
 | `loginTimeout` | `60` | Login timeout in seconds |
 
 ### DSN Examples
 
 ```bash
-# Basic connection
+# Basic connection (username/password)
 user:pass@myaccount/mydb/public?warehouse=COMPUTE_WH
 
 # With role
@@ -242,6 +242,62 @@ user:pass@myaccount/mydb/public?warehouse=COMPUTE_WH&role=ANALYST
 # Full URL format
 user:pass@myorg-myaccount/mydb/PUBLIC?warehouse=COMPUTE_WH&role=DATA_READER
 ```
+
+### Key Pair (JWT) Authentication
+
+For environments where username/password is not permitted, Faucet supports Snowflake key pair authentication using RSA private keys.
+
+**1. Generate an RSA key pair:**
+
+```bash
+# Generate PKCS#8 private key (recommended)
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out snowflake_key.p8
+
+# Extract the public key
+openssl pkey -in snowflake_key.p8 -pubout -out snowflake_key.pub
+```
+
+**2. Register the public key in Snowflake:**
+
+```sql
+ALTER USER MY_USER SET RSA_PUBLIC_KEY='MIIBIjANBg...';
+```
+
+(Paste the key contents without the `-----BEGIN/END PUBLIC KEY-----` headers.)
+
+**3. Configure the service with `private_key_path`:**
+
+```bash
+# Via CLI — no password needed in the DSN
+faucet db add \
+  --name analytics \
+  --driver snowflake \
+  --dsn "MY_USER@myorg-myaccount/ANALYTICS/PUBLIC?warehouse=COMPUTE_WH" \
+  --private-key-path /path/to/snowflake_key.p8
+```
+
+Via API:
+
+```json
+{
+  "name": "analytics",
+  "driver": "snowflake",
+  "dsn": "MY_USER@myorg-myaccount/ANALYTICS/PUBLIC?warehouse=COMPUTE_WH",
+  "private_key_path": "/path/to/snowflake_key.p8"
+}
+```
+
+Via YAML config:
+
+```yaml
+services:
+  - name: analytics
+    driver: snowflake
+    dsn: "MY_USER@myorg-myaccount/ANALYTICS/PUBLIC?warehouse=COMPUTE_WH"
+    private_key_path: /path/to/snowflake_key.p8
+```
+
+Supported PEM formats: `PKCS#8` (`PRIVATE KEY`) and `PKCS#1` (`RSA PRIVATE KEY`).
 
 ### Supported Features
 
@@ -252,16 +308,91 @@ user:pass@myorg-myaccount/mydb/PUBLIC?warehouse=COMPUTE_WH&role=DATA_READER
 | Upsert | No |
 | Stored procedures | Yes |
 | Views | Yes |
+| Key pair (JWT) auth | Yes |
 | Parameter style | `?` |
 | Default schema | `PUBLIC` |
 
 ### Adding via CLI
 
 ```bash
+# Username/password
 faucet db add \
   --name mysnowflake \
   --driver snowflake \
   --dsn "user:pass@myaccount/mydb/public?warehouse=COMPUTE_WH"
+
+# Key pair authentication
+faucet db add \
+  --name mysnowflake \
+  --driver snowflake \
+  --dsn "user@myaccount/mydb/public?warehouse=COMPUTE_WH" \
+  --private-key-path /path/to/key.p8
+```
+
+---
+
+## SQLite
+
+**Driver name:** `sqlite`
+
+### DSN Format
+
+```
+/path/to/database.db?param=value
+```
+
+Or for an in-memory database:
+
+```
+:memory:
+```
+
+### Common DSN Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `_journal_mode` | `delete` | Set to `WAL` for better concurrent read performance |
+| `_busy_timeout` | `5000` | Milliseconds to wait when the database is locked |
+| `_foreign_keys` | `on` | Enable foreign key enforcement |
+| `_cache_size` | `-2000` | Page cache size (negative = KB, positive = pages) |
+
+### DSN Examples
+
+```bash
+# Local file
+/var/lib/faucet/mydata.db
+
+# With WAL mode (recommended)
+/var/lib/faucet/mydata.db?_journal_mode=WAL
+
+# With WAL and busy timeout
+/var/lib/faucet/mydata.db?_journal_mode=WAL&_busy_timeout=10000
+
+# In-memory (ephemeral, for testing)
+:memory:
+```
+
+### Supported Features
+
+| Feature | Supported |
+|---------|-----------|
+| Schema introspection | Yes |
+| RETURNING clause | Yes (SQLite 3.35+) |
+| Upsert (ON CONFLICT) | Yes |
+| Stored procedures | No |
+| Views | Yes |
+| Parameter style | `?` |
+| Default schema | `main` |
+
+Note: SQLite does not support stored procedures. The `_proc` endpoint returns an error for SQLite services.
+
+### Adding via CLI
+
+```bash
+faucet db add \
+  --name mydata \
+  --driver sqlite \
+  --dsn "/path/to/mydata.db?_journal_mode=WAL"
 ```
 
 ---
@@ -299,6 +430,7 @@ Each service has its own connection pool. Configure it when creating the service
 - **Medium production:** `max_open_conns=25, max_idle_conns=5` (defaults)
 - **High traffic:** `max_open_conns=50-100, max_idle_conns=10-25`
 - **Serverless databases (Snowflake, Aurora Serverless):** Lower `max_open_conns` to respect provider limits
+- **SQLite:** `max_open_conns=1, max_idle_conns=1` (SQLite supports only one writer at a time)
 
 Keep `conn_max_lifetime` shorter than the database server's connection timeout to avoid stale connections.
 
@@ -314,6 +446,7 @@ By default, Faucet exposes the database's default schema:
 | MySQL | (the database itself) |
 | SQL Server | `dbo` |
 | Snowflake | `PUBLIC` |
+| SQLite | `main` |
 
 Override with the `--schema` flag when adding a service or the `schema` field in the API:
 

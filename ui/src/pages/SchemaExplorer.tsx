@@ -3,9 +3,7 @@ import { apiFetch } from '../hooks/useApi';
 
 interface TableInfo {
   name: string;
-  schema: string;
-  type: string;
-  row_count?: number;
+  type?: string;
 }
 
 interface ColumnInfo {
@@ -22,7 +20,7 @@ interface ColumnInfo {
 }
 
 export function SchemaExplorer() {
-  const [services, setServices] = useState<{ name: string; type: string }[]>([]);
+  const [services, setServices] = useState<{ name: string; driver: string }[]>([]);
   const [selectedService, setSelectedService] = useState('');
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [selectedTable, setSelectedTable] = useState('');
@@ -32,9 +30,9 @@ export function SchemaExplorer() {
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    apiFetch('/api/v1/services')
+    apiFetch('/api/v1/system/service')
       .then((res) => {
-        const svcs = res.resource || [];
+        const svcs = (res.resource || []).map((s: any) => ({ name: s.name, driver: s.driver }));
         setServices(svcs);
         // Check URL params for pre-selected service
         const params = new URLSearchParams(window.location.search);
@@ -53,8 +51,15 @@ export function SchemaExplorer() {
     setLoadingTables(true);
     setSelectedTable('');
     setColumns([]);
-    apiFetch(`/api/v1/services/${selectedService}/tables`)
-      .then((res) => setTables(res.resource || []))
+    apiFetch(`/api/v1/${selectedService}/_schema`)
+      .then((res) => {
+        // The schema endpoint returns table info - could be resource array or table_names
+        const tableData = res.resource || res.tables || [];
+        const parsed: TableInfo[] = tableData.map((t: any) =>
+          typeof t === 'string' ? { name: t } : { name: t.name, type: t.type }
+        );
+        setTables(parsed);
+      })
       .catch(() => setTables([]))
       .finally(() => setLoadingTables(false));
   }, [selectedService]);
@@ -62,8 +67,11 @@ export function SchemaExplorer() {
   useEffect(() => {
     if (!selectedService || !selectedTable) return;
     setLoadingColumns(true);
-    apiFetch(`/api/v1/services/${selectedService}/tables/${selectedTable}/columns`)
-      .then((res) => setColumns(res.resource || []))
+    apiFetch(`/api/v1/${selectedService}/_schema/${selectedTable}`)
+      .then((res) => {
+        const cols = res.resource || res.columns || res.fields || [];
+        setColumns(cols);
+      })
       .catch(() => setColumns([]))
       .finally(() => setLoadingColumns(false));
   }, [selectedService, selectedTable]);
@@ -101,7 +109,7 @@ export function SchemaExplorer() {
           <option value="">Select a service...</option>
           {services.map((s) => (
             <option key={s.name} value={s.name}>
-              {s.name} ({s.type})
+              {s.name} ({s.driver})
             </option>
           ))}
         </select>
@@ -156,11 +164,6 @@ export function SchemaExplorer() {
                         </svg>
                         <span class="truncate font-mono text-xs">{table.name}</span>
                       </span>
-                      {table.row_count !== undefined && (
-                        <span class="text-xs text-text-muted ml-2 shrink-0">
-                          {table.row_count.toLocaleString()}
-                        </span>
-                      )}
                     </button>
                   ))}
                 </div>

@@ -60,6 +60,7 @@ type ConnectionConfig struct {
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
 	ConnMaxIdleTime time.Duration
+	PrivateKeyPath  string // Path to PEM-encoded private key file (Snowflake JWT auth)
 }
 
 // Connector is the interface that all database connectors must implement.

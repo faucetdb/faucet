@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "faucet": {
+      "command": "faucet",
+      "args": ["mcp"]
+    }
+  }
+}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -220,13 +221,39 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"ok"}`))
 }
 
-// handleReadyz is a readiness probe. Returns 200 when the server is ready
-// to accept traffic. In the future this will verify database connectivity.
+// handleReadyz is a readiness probe. Returns 200 when all database connectors
+// are reachable, or 503 if any connector is unhealthy.
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
-	// TODO: ping all active connectors and report aggregate health
+	status := "ok"
+	httpStatus := http.StatusOK
+	checks := make(map[string]string)
+
+	// Check all active connectors
+	for _, name := range s.registry.ListServices() {
+		conn, err := s.registry.Get(name)
+		if err != nil {
+			checks[name] = "error: " + err.Error()
+			status = "degraded"
+			continue
+		}
+		if err := conn.Ping(r.Context()); err != nil {
+			checks[name] = "error: " + err.Error()
+			status = "degraded"
+		} else {
+			checks[name] = "ok"
+		}
+	}
+
+	if status != "ok" {
+		httpStatus = http.StatusServiceUnavailable
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ok"}`))
+	w.WriteHeader(httpStatus)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": status,
+		"checks": checks,
+	})
 }
 
 // ListenAndServe starts the HTTP server and blocks until a SIGINT or SIGTERM

@@ -82,6 +82,7 @@ func runMCP(transport string, port int, dataDir string) error {
 		cfg := connector.ConnectionConfig{
 			Driver:          svc.Driver,
 			DSN:             svc.DSN,
+			PrivateKeyPath:  svc.PrivateKeyPath,
 			SchemaName:      svc.Schema,
 			MaxOpenConns:    svc.Pool.MaxOpenConns,
 			MaxIdleConns:    svc.Pool.MaxIdleConns,

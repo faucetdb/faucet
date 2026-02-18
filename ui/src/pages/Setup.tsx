@@ -4,11 +4,11 @@ import { apiFetch } from '../hooks/useApi';
 
 type Step = 'welcome' | 'admin' | 'database' | 'done';
 
-const DB_TYPES = [
-  { value: 'postgres', label: 'PostgreSQL', port: 5432 },
-  { value: 'mysql', label: 'MySQL', port: 3306 },
-  { value: 'mssql', label: 'SQL Server', port: 1433 },
-  { value: 'snowflake', label: 'Snowflake', port: 443 },
+const DB_DRIVERS = [
+  { value: 'postgres', label: 'PostgreSQL' },
+  { value: 'mysql', label: 'MySQL' },
+  { value: 'mssql', label: 'SQL Server' },
+  { value: 'snowflake', label: 'Snowflake' },
 ];
 
 export function Setup() {
@@ -20,12 +20,9 @@ export function Setup() {
   });
   const [dbForm, setDbForm] = useState({
     name: '',
-    type: 'postgres',
-    host: 'localhost',
-    port: 5432,
-    database: '',
-    username: '',
-    password: '',
+    driver: 'postgres',
+    dsn: '',
+    schema: '',
   });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -43,13 +40,17 @@ export function Setup() {
     setSaving(true);
     setError(null);
     try {
-      await apiFetch('/api/v1/system/setup/admin', {
+      const res = await apiFetch('/api/v1/system/admin', {
         method: 'POST',
         body: {
           username: adminForm.username,
           password: adminForm.password,
         },
       });
+      // If we get a session token, store it
+      if (res.session_token) {
+        localStorage.setItem('faucet_session', res.session_token);
+      }
       setStep('database');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create admin account');
@@ -62,9 +63,17 @@ export function Setup() {
     setSaving(true);
     setError(null);
     try {
-      await apiFetch('/api/v1/services', {
+      const body: Record<string, any> = {
+        name: dbForm.name,
+        driver: dbForm.driver,
+        dsn: dbForm.dsn,
+      };
+      if (dbForm.schema) {
+        body.schema = dbForm.schema;
+      }
+      await apiFetch('/api/v1/system/service', {
         method: 'POST',
-        body: dbForm,
+        body,
       });
       setStep('done');
     } catch (err) {
@@ -74,13 +83,19 @@ export function Setup() {
     }
   }
 
-  function handleTypeChange(type: string) {
-    const dbType = DB_TYPES.find((t) => t.value === type);
-    setDbForm({
-      ...dbForm,
-      type,
-      port: dbType?.port || dbForm.port,
-    });
+  function dsnPlaceholder(driver: string): string {
+    switch (driver) {
+      case 'postgres':
+        return 'postgres://user:pass@localhost:5432/dbname?sslmode=disable';
+      case 'mysql':
+        return 'user:pass@tcp(localhost:3306)/dbname';
+      case 'mssql':
+        return 'sqlserver://user:pass@localhost:1433?database=dbname';
+      case 'snowflake':
+        return 'user:pass@account/dbname/schema?warehouse=wh';
+      default:
+        return '';
+    }
   }
 
   const steps: { key: Step; label: string }[] = [
@@ -233,77 +248,48 @@ export function Setup() {
                 </div>
 
                 <div>
-                  <label class="block text-sm font-medium text-text-secondary mb-1.5">Database Type</label>
+                  <label class="block text-sm font-medium text-text-secondary mb-1.5">Database Driver</label>
                   <div class="grid grid-cols-2 gap-2">
-                    {DB_TYPES.map((t) => (
+                    {DB_DRIVERS.map((d) => (
                       <button
-                        key={t.value}
-                        onClick={() => handleTypeChange(t.value)}
+                        key={d.value}
+                        onClick={() => setDbForm({ ...dbForm, driver: d.value })}
                         class={`
                           p-3 rounded-lg border text-left text-sm font-medium transition-colors
-                          ${dbForm.type === t.value
+                          ${dbForm.driver === d.value
                             ? 'border-brand bg-brand/10 text-brand'
                             : 'border-border-default bg-surface hover:bg-surface-overlay text-text-secondary'
                           }
                         `}
                       >
-                        {t.label}
+                        {d.label}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                <div class="grid grid-cols-3 gap-3">
-                  <div class="col-span-2">
-                    <label class="block text-sm font-medium text-text-secondary mb-1.5">Host</label>
-                    <input
-                      type="text"
-                      class="input w-full font-mono text-sm"
-                      value={dbForm.host}
-                      onInput={(e) => setDbForm({ ...dbForm, host: (e.target as HTMLInputElement).value })}
-                    />
-                  </div>
-                  <div>
-                    <label class="block text-sm font-medium text-text-secondary mb-1.5">Port</label>
-                    <input
-                      type="number"
-                      class="input w-full font-mono text-sm"
-                      value={dbForm.port}
-                      onInput={(e) => setDbForm({ ...dbForm, port: parseInt((e.target as HTMLInputElement).value) || 0 })}
-                    />
-                  </div>
-                </div>
-
                 <div>
-                  <label class="block text-sm font-medium text-text-secondary mb-1.5">Database Name</label>
+                  <label class="block text-sm font-medium text-text-secondary mb-1.5">DSN (Connection String)</label>
                   <input
                     type="text"
                     class="input w-full font-mono text-sm"
-                    placeholder="mydb"
-                    value={dbForm.database}
-                    onInput={(e) => setDbForm({ ...dbForm, database: (e.target as HTMLInputElement).value })}
+                    placeholder={dsnPlaceholder(dbForm.driver)}
+                    value={dbForm.dsn}
+                    onInput={(e) => setDbForm({ ...dbForm, dsn: (e.target as HTMLInputElement).value })}
                   />
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
-                  <div>
-                    <label class="block text-sm font-medium text-text-secondary mb-1.5">Username</label>
-                    <input
-                      type="text"
-                      class="input w-full font-mono text-sm"
-                      value={dbForm.username}
-                      onInput={(e) => setDbForm({ ...dbForm, username: (e.target as HTMLInputElement).value })}
-                    />
-                  </div>
-                  <div>
-                    <label class="block text-sm font-medium text-text-secondary mb-1.5">Password</label>
-                    <input
-                      type="password"
-                      class="input w-full font-mono text-sm"
-                      value={dbForm.password}
-                      onInput={(e) => setDbForm({ ...dbForm, password: (e.target as HTMLInputElement).value })}
-                    />
-                  </div>
+                <div>
+                  <label class="block text-sm font-medium text-text-secondary mb-1.5">
+                    Schema <span class="text-text-muted font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    class="input w-full font-mono text-sm"
+                    placeholder="public"
+                    value={dbForm.schema}
+                    onInput={(e) => setDbForm({ ...dbForm, schema: (e.target as HTMLInputElement).value })}
+                  />
                 </div>
               </div>
 
@@ -316,7 +302,7 @@ export function Setup() {
                 </button>
                 <button
                   onClick={handleDbSubmit}
-                  disabled={saving || !dbForm.name || !dbForm.database}
+                  disabled={saving || !dbForm.name || !dbForm.dsn}
                   class="btn-primary"
                 >
                   {saving ? 'Connecting...' : 'Connect & Finish'}

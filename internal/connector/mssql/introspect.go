@@ -49,9 +49,9 @@ type fkRow struct {
 
 // routineRow holds a stored procedure or function from information_schema.routines.
 type routineRow struct {
-	RoutineName string `db:"ROUTINE_NAME"`
-	RoutineType string `db:"ROUTINE_TYPE"`
-	DataType    string `db:"DATA_TYPE"`
+	RoutineName string  `db:"ROUTINE_NAME"`
+	RoutineType string  `db:"ROUTINE_TYPE"`
+	DataType    *string `db:"DATA_TYPE"`
 }
 
 // IntrospectSchema returns the full schema for the configured SQL Server
@@ -181,9 +181,13 @@ func (c *MSSQLConnector) IntrospectSchema(ctx context.Context) (*model.Schema, e
 	}
 
 	for _, r := range routines {
+		returnType := ""
+		if r.DataType != nil {
+			returnType = *r.DataType
+		}
 		sp := model.StoredProcedure{
 			Name:       r.RoutineName,
-			ReturnType: r.DataType,
+			ReturnType: returnType,
 		}
 		switch strings.ToUpper(r.RoutineType) {
 		case "PROCEDURE":
@@ -361,9 +365,13 @@ func (c *MSSQLConnector) GetStoredProcedures(ctx context.Context) ([]model.Store
 
 	result := make([]model.StoredProcedure, 0, len(routines))
 	for _, r := range routines {
+		returnType := ""
+		if r.DataType != nil {
+			returnType = *r.DataType
+		}
 		sp := model.StoredProcedure{
 			Name:       r.RoutineName,
-			ReturnType: r.DataType,
+			ReturnType: returnType,
 		}
 		switch strings.ToUpper(r.RoutineType) {
 		case "PROCEDURE":

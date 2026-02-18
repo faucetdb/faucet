@@ -40,7 +40,7 @@ export function ApiKeys() {
   async function loadKeys() {
     setLoading(true);
     try {
-      const res = await apiFetch('/api/v1/system/api-keys');
+      const res = await apiFetch('/api/v1/system/api-key');
       setKeys(res.resource || []);
     } catch {
       setKeys([]);
@@ -51,7 +51,7 @@ export function ApiKeys() {
 
   async function loadRoles() {
     try {
-      const res = await apiFetch('/api/v1/system/roles');
+      const res = await apiFetch('/api/v1/system/role');
       setRoles((res.resource || []).map((r: any) => ({ id: r.id, name: r.name })));
     } catch {
       setRoles([]);
@@ -75,7 +75,7 @@ export function ApiKeys() {
       if (form.expires_in_days > 0) {
         body.expires_in_days = form.expires_in_days;
       }
-      const res = await apiFetch('/api/v1/system/api-keys', { method: 'POST', body });
+      const res = await apiFetch('/api/v1/system/api-key', { method: 'POST', body });
       setShowModal(false);
       setNewKey(res.key);
       setShowKeyModal(true);
@@ -90,7 +90,7 @@ export function ApiKeys() {
   async function handleRevoke(id: string, name: string) {
     if (!confirm(`Revoke API key "${name}"? This cannot be undone.`)) return;
     try {
-      await apiFetch(`/api/v1/system/api-keys/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/v1/system/api-key/${id}`, { method: 'DELETE' });
       loadKeys();
     } catch {
       // ignore
@@ -196,7 +196,7 @@ export function ApiKeys() {
         </svg>
         <div class="text-sm text-text-secondary">
           API keys authenticate requests to Faucet. Include the key in the
-          <code class="px-1.5 py-0.5 rounded bg-surface-overlay font-mono text-xs text-cyan-accent mx-1">X-Faucet-Api-Key</code>
+          <code class="px-1.5 py-0.5 rounded bg-surface-overlay font-mono text-xs text-cyan-accent mx-1">X-API-Key</code>
           header. Keys are hashed and cannot be retrieved after creation.
         </div>
       </div>

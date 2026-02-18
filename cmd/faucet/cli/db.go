@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/faucetdb/faucet/internal/connector"
+	"github.com/faucetdb/faucet/internal/model"
 )
 
 func newDBCmd() *cobra.Command {
@@ -42,7 +46,7 @@ func newDBAddCmd() *cobra.Command {
 		Long: `Add a new database service connection. Provide flags for non-interactive use,
 or omit them to be prompted interactively.
 
-Supported drivers: postgres, mysql, mssql, snowflake`,
+Supported drivers: postgres, mysql, mssql, snowflake, sqlite`,
 		Example: `  faucet db add --name mydb --driver postgres --dsn "postgres://user:pass@localhost/mydb"
   faucet db add  # interactive mode`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -51,7 +55,7 @@ Supported drivers: postgres, mysql, mssql, snowflake`,
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", "Service name (unique identifier)")
-	cmd.Flags().StringVar(&driver, "driver", "", "Database driver (postgres, mysql, mssql, snowflake)")
+	cmd.Flags().StringVar(&driver, "driver", "", "Database driver (postgres, mysql, mssql, snowflake, sqlite)")
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Data source name / connection string")
 	cmd.Flags().StringVar(&label, "label", "", "Human-readable label (defaults to name)")
 	cmd.Flags().StringVar(&schema, "schema", "", "Database schema to expose (default depends on driver)")
@@ -66,7 +70,7 @@ func runDBAdd(name, driver, dsn, label, schema string) error {
 		fmt.Scanln(&name)
 	}
 	if driver == "" {
-		fmt.Print("Driver (postgres, mysql, mssql, snowflake): ")
+		fmt.Print("Driver (postgres, mysql, mssql, snowflake, sqlite): ")
 		fmt.Scanln(&driver)
 	}
 	if dsn == "" {
@@ -83,18 +87,35 @@ func runDBAdd(name, driver, dsn, label, schema string) error {
 	}
 
 	supportedDrivers := map[string]bool{
-		"postgres": true, "mysql": true, "mssql": true, "snowflake": true,
+		"postgres": true, "mysql": true, "mssql": true, "snowflake": true, "sqlite": true,
 	}
 	if !supportedDrivers[driver] {
-		return fmt.Errorf("unsupported driver %q; supported: postgres, mysql, mssql, snowflake", driver)
+		return fmt.Errorf("unsupported driver %q; supported: postgres, mysql, mssql, snowflake, sqlite", driver)
 	}
 
-	// TODO: open config store, insert service config
-	// store, err := config.Open(...)
-	// svc := model.ServiceConfig{Name: name, Driver: driver, DSN: dsn, Label: label, Schema: schema, IsActive: true}
-	// err = store.CreateService(svc)
-	fmt.Printf("Added service %q (driver=%s)\n", name, driver)
-	fmt.Println("  (placeholder: config store not yet wired)")
+	store, err := openConfigStore()
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	svc := &model.ServiceConfig{
+		Name:     name,
+		Label:    label,
+		Driver:   driver,
+		DSN:      dsn,
+		Schema:   schema,
+		IsActive: true,
+		Pool:     model.DefaultPoolConfig(),
+	}
+
+	if err := store.CreateService(ctx, svc); err != nil {
+		return fmt.Errorf("create service: %w", err)
+	}
+
+	fmt.Printf("Added service %q (driver=%s, id=%d)\n", name, driver, svc.ID)
 	return nil
 }
 
@@ -104,8 +125,8 @@ func newDBListCmd() *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List all registered database services",
+		Use:     "list",
+		Short:   "List all registered database services",
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDBList(jsonOutput)
@@ -118,23 +139,39 @@ func newDBListCmd() *cobra.Command {
 }
 
 func runDBList(jsonOutput bool) error {
-	// TODO: open config store, list services
-	// store, _ := config.Open(...)
-	// services, err := store.ListServices()
+	store, err := openConfigStore()
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer store.Close()
 
-	// Placeholder output
-	type serviceRow struct {
-		Name   string `json:"name"`
-		Driver string `json:"driver"`
-		Active bool   `json:"active"`
+	ctx := context.Background()
+	services, err := store.ListServices(ctx)
+	if err != nil {
+		return fmt.Errorf("list services: %w", err)
 	}
 
-	services := []serviceRow{} // empty until config store is wired
-
 	if jsonOutput {
+		type serviceRow struct {
+			Name   string `json:"name"`
+			Driver string `json:"driver"`
+			Label  string `json:"label"`
+			Schema string `json:"schema"`
+			Active bool   `json:"active"`
+		}
+		rows := make([]serviceRow, len(services))
+		for i, s := range services {
+			rows[i] = serviceRow{
+				Name:   s.Name,
+				Driver: s.Driver,
+				Label:  s.Label,
+				Schema: s.Schema,
+				Active: s.IsActive,
+			}
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(services)
+		return enc.Encode(rows)
 	}
 
 	if len(services) == 0 {
@@ -146,7 +183,7 @@ func runDBList(jsonOutput bool) error {
 	fmt.Printf("%-20s %-12s %-8s\n", "----", "------", "------")
 	for _, s := range services {
 		active := "yes"
-		if !s.Active {
+		if !s.IsActive {
 			active = "no"
 		}
 		fmt.Printf("%-20s %-12s %-8s\n", s.Name, s.Driver, active)
@@ -172,12 +209,24 @@ func newDBRemoveCmd() *cobra.Command {
 }
 
 func runDBRemove(name string) error {
-	// TODO: open config store, delete service
-	// store, _ := config.Open(...)
-	// err := store.DeleteService(name)
+	store, err := openConfigStore()
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	svc, err := store.GetServiceByName(ctx, name)
+	if err != nil {
+		return fmt.Errorf("look up service %q: %w", name, err)
+	}
+
+	if err := store.DeleteService(ctx, svc.ID); err != nil {
+		return fmt.Errorf("delete service: %w", err)
+	}
 
 	fmt.Printf("Removed service %q\n", name)
-	fmt.Println("  (placeholder: config store not yet wired)")
 	return nil
 }
 
@@ -197,17 +246,49 @@ func newDBTestCmd() *cobra.Command {
 }
 
 func runDBTest(name string) error {
-	// TODO: open config store, look up service config, create connector, ping
-	// store, _ := config.Open(...)
-	// svc, err := store.GetService(name)
-	// registry := connector.NewRegistry()
-	// registerDrivers(registry)
-	// err = registry.Connect(name, connector.ConnectionConfig{Driver: svc.Driver, DSN: svc.DSN})
-	// conn, _ := registry.Get(name)
-	// err = conn.Ping(context.Background())
+	store, err := openConfigStore()
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	defer store.Close()
 
-	fmt.Printf("Testing connection %q...\n", name)
-	fmt.Println("  (placeholder: config store not yet wired)")
+	ctx := context.Background()
+
+	svc, err := store.GetServiceByName(ctx, name)
+	if err != nil {
+		return fmt.Errorf("look up service %q: %w", name, err)
+	}
+
+	registry := newRegistry()
+	defer registry.CloseAll()
+
+	cfg := connector.ConnectionConfig{
+		Driver:          svc.Driver,
+		DSN:             svc.DSN,
+		PrivateKeyPath:  svc.PrivateKeyPath,
+		SchemaName:      svc.Schema,
+		MaxOpenConns:    svc.Pool.MaxOpenConns,
+		MaxIdleConns:    svc.Pool.MaxIdleConns,
+		ConnMaxLifetime: svc.Pool.ConnMaxLifetime,
+		ConnMaxIdleTime: svc.Pool.ConnMaxIdleTime,
+	}
+
+	fmt.Printf("Testing connection %q (driver=%s)...\n", name, svc.Driver)
+
+	if err := registry.Connect(name, cfg); err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+
+	conn, err := registry.Get(name)
+	if err != nil {
+		return fmt.Errorf("get connector: %w", err)
+	}
+
+	if err := conn.Ping(ctx); err != nil {
+		return fmt.Errorf("ping failed: %w", err)
+	}
+
+	fmt.Println("Connection successful.")
 	return nil
 }
 
@@ -232,25 +313,56 @@ func newDBSchemaCmd() *cobra.Command {
 }
 
 func runDBSchema(name, tableName string) error {
-	// TODO: open config store, connect, introspect
-	// store, _ := config.Open(...)
-	// svc, err := store.GetService(name)
-	// registry := connector.NewRegistry()
-	// registerDrivers(registry)
-	// registry.Connect(name, connector.ConnectionConfig{Driver: svc.Driver, DSN: svc.DSN})
-	// conn, _ := registry.Get(name)
-	//
-	// if tableName != "" {
-	//     schema, err := conn.IntrospectTable(context.Background(), tableName)
-	// } else {
-	//     schema, err := conn.IntrospectSchema(context.Background())
-	// }
-
-	fmt.Printf("Schema for service %q", name)
-	if tableName != "" {
-		fmt.Printf(" (table: %s)", tableName)
+	store, err := openConfigStore()
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
 	}
-	fmt.Println()
-	fmt.Println("  (placeholder: config store not yet wired)")
-	return nil
+	defer store.Close()
+
+	ctx := context.Background()
+
+	svc, err := store.GetServiceByName(ctx, name)
+	if err != nil {
+		return fmt.Errorf("look up service %q: %w", name, err)
+	}
+
+	registry := newRegistry()
+	defer registry.CloseAll()
+
+	cfg := connector.ConnectionConfig{
+		Driver:          svc.Driver,
+		DSN:             svc.DSN,
+		PrivateKeyPath:  svc.PrivateKeyPath,
+		SchemaName:      svc.Schema,
+		MaxOpenConns:    svc.Pool.MaxOpenConns,
+		MaxIdleConns:    svc.Pool.MaxIdleConns,
+		ConnMaxLifetime: svc.Pool.ConnMaxLifetime,
+		ConnMaxIdleTime: svc.Pool.ConnMaxIdleTime,
+	}
+
+	if err := registry.Connect(name, cfg); err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+
+	conn, err := registry.Get(name)
+	if err != nil {
+		return fmt.Errorf("get connector: %w", err)
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+
+	if tableName != "" {
+		table, err := conn.IntrospectTable(ctx, tableName)
+		if err != nil {
+			return fmt.Errorf("introspect table %q: %w", tableName, err)
+		}
+		return enc.Encode(table)
+	}
+
+	schema, err := conn.IntrospectSchema(ctx)
+	if err != nil {
+		return fmt.Errorf("introspect schema: %w", err)
+	}
+	return enc.Encode(schema)
 }

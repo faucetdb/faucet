@@ -1,6 +1,9 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 func (s *Store) migrate() error {
 	migrations := []string{
@@ -68,10 +71,18 @@ func (s *Store) migrate() error {
 
 		`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`,
 		`CREATE INDEX IF NOT EXISTS idx_role_access_role_id ON role_access(role_id)`,
+
+		// v2: Add private_key_path for Snowflake JWT / key-pair auth
+		`ALTER TABLE services ADD COLUMN private_key_path TEXT NOT NULL DEFAULT ''`,
 	}
 
 	for _, m := range migrations {
 		if _, err := s.db.Exec(m); err != nil {
+			// SQLite ALTER TABLE ADD COLUMN fails if column already exists;
+			// treat "duplicate column" as a no-op for idempotent migrations.
+			if strings.Contains(err.Error(), "duplicate column") {
+				continue
+			}
 			return fmt.Errorf("migration failed: %w\nSQL: %s", err, m)
 		}
 	}

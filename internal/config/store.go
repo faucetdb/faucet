@@ -72,6 +72,7 @@ type serviceRow struct {
 	Label             string    `db:"label"`
 	Driver            string    `db:"driver"`
 	DSN               string    `db:"dsn"`
+	PrivateKeyPath    string    `db:"private_key_path"`
 	SchemaName        string    `db:"schema_name"`
 	ReadOnly          bool      `db:"read_only"`
 	RawSQLAllowed     bool      `db:"raw_sql_allowed"`
@@ -91,6 +92,7 @@ func serviceRowFromModel(svc *model.ServiceConfig) serviceRow {
 		Label:             svc.Label,
 		Driver:            svc.Driver,
 		DSN:               svc.DSN,
+		PrivateKeyPath:    svc.PrivateKeyPath,
 		SchemaName:        svc.Schema,
 		ReadOnly:          svc.ReadOnly,
 		RawSQLAllowed:     svc.RawSQL,
@@ -106,15 +108,16 @@ func serviceRowFromModel(svc *model.ServiceConfig) serviceRow {
 
 func (r serviceRow) toModel() model.ServiceConfig {
 	return model.ServiceConfig{
-		ID:       r.ID,
-		Name:     r.Name,
-		Label:    r.Label,
-		Driver:   r.Driver,
-		DSN:      r.DSN,
-		Schema:   r.SchemaName,
-		ReadOnly: r.ReadOnly,
-		RawSQL:   r.RawSQLAllowed,
-		IsActive: r.IsActive,
+		ID:             r.ID,
+		Name:           r.Name,
+		Label:          r.Label,
+		Driver:         r.Driver,
+		DSN:            r.DSN,
+		PrivateKeyPath: r.PrivateKeyPath,
+		Schema:         r.SchemaName,
+		ReadOnly:       r.ReadOnly,
+		RawSQL:         r.RawSQLAllowed,
+		IsActive:       r.IsActive,
 		Pool: model.PoolConfig{
 			MaxOpenConns:    r.MaxOpenConns,
 			MaxIdleConns:    r.MaxIdleConns,
@@ -136,11 +139,11 @@ func (s *Store) CreateService(ctx context.Context, svc *model.ServiceConfig) err
 	row := serviceRowFromModel(svc)
 
 	const q = `INSERT INTO services
-		(name, label, driver, dsn, schema_name, read_only, raw_sql_allowed, is_active,
+		(name, label, driver, dsn, private_key_path, schema_name, read_only, raw_sql_allowed, is_active,
 		 max_open_conns, max_idle_conns, conn_max_lifetime_ms, conn_max_idle_time_ms,
 		 created_at, updated_at)
 		VALUES
-		(:name, :label, :driver, :dsn, :schema_name, :read_only, :raw_sql_allowed, :is_active,
+		(:name, :label, :driver, :dsn, :private_key_path, :schema_name, :read_only, :raw_sql_allowed, :is_active,
 		 :max_open_conns, :max_idle_conns, :conn_max_lifetime_ms, :conn_max_idle_time_ms,
 		 :created_at, :updated_at)`
 
@@ -204,7 +207,7 @@ func (s *Store) UpdateService(ctx context.Context, svc *model.ServiceConfig) err
 	row := serviceRowFromModel(svc)
 
 	const q = `UPDATE services SET
-		name = :name, label = :label, driver = :driver, dsn = :dsn,
+		name = :name, label = :label, driver = :driver, dsn = :dsn, private_key_path = :private_key_path,
 		schema_name = :schema_name, read_only = :read_only, raw_sql_allowed = :raw_sql_allowed,
 		is_active = :is_active, max_open_conns = :max_open_conns, max_idle_conns = :max_idle_conns,
 		conn_max_lifetime_ms = :conn_max_lifetime_ms, conn_max_idle_time_ms = :conn_max_idle_time_ms,
@@ -280,6 +283,23 @@ func (s *Store) GetRole(ctx context.Context, id int64) (*model.Role, error) {
 	}
 
 	access, err := s.GetRoleAccess(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get role access: %w", err)
+	}
+	role.Access = access
+	return &role, nil
+}
+
+// GetRoleByName returns a role by its unique name.
+func (s *Store) GetRoleByName(ctx context.Context, name string) (*model.Role, error) {
+	var role model.Role
+	if err := s.db.GetContext(ctx, &role, "SELECT * FROM roles WHERE name = ?", name); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get role by name: %w", err)
+	}
+	access, err := s.GetRoleAccess(ctx, role.ID)
 	if err != nil {
 		return nil, fmt.Errorf("get role access: %w", err)
 	}
@@ -581,6 +601,23 @@ func (s *Store) RevokeAPIKey(ctx context.Context, id int64) error {
 		"UPDATE api_keys SET is_active = 0 WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("revoke api key: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("revoke api key rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// RevokeAPIKeyByPrefix marks an API key as inactive by its prefix.
+func (s *Store) RevokeAPIKeyByPrefix(ctx context.Context, prefix string) error {
+	result, err := s.db.ExecContext(ctx,
+		"UPDATE api_keys SET is_active = 0 WHERE key_prefix = ? AND is_active = 1", prefix)
+	if err != nil {
+		return fmt.Errorf("revoke api key by prefix: %w", err)
 	}
 	n, err := result.RowsAffected()
 	if err != nil {

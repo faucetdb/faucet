@@ -1,0 +1,59 @@
+# Faucet Configuration Example
+# Copy to ./faucet.yaml or ~/.faucet/faucet.yaml
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  shutdown_timeout: 30s
+  cors_origins:
+    - "*"
+  enable_ui: true
+  max_body_size: 10485760  # 10MB
+
+auth:
+  jwt_secret: "${FAUCET_JWT_SECRET}"  # Set via environment variable
+  token_expiry: 24h
+
+# Database services - add your connections here
+services:
+  - name: mydb
+    label: "My PostgreSQL Database"
+    driver: postgres
+    dsn: "postgres://${DB_USER}:${DB_PASS}@localhost:5432/mydb?sslmode=disable"
+    schema: public
+    read_only: false
+    raw_sql_allowed: false
+    pool:
+      max_open_conns: 25
+      max_idle_conns: 5
+      conn_max_lifetime: 5m
+      conn_max_idle_time: 1m
+
+  # MySQL example
+  # - name: mysql_db
+  #   label: "MySQL Database"
+  #   driver: mysql
+  #   dsn: "${MYSQL_USER}:${MYSQL_PASS}@tcp(localhost:3306)/mydb?parseTime=true"
+  #   read_only: false
+
+  # SQL Server example
+  # - name: mssql_db
+  #   label: "SQL Server"
+  #   driver: mssql
+  #   dsn: "sqlserver://${MSSQL_USER}:${MSSQL_PASS}@localhost:1433?database=mydb"
+  #   read_only: false
+
+  # Snowflake example
+  # - name: snowflake_db
+  #   label: "Snowflake Warehouse"
+  #   driver: snowflake
+  #   dsn: "${SF_USER}:${SF_PASS}@${SF_ACCOUNT}/${SF_DB}/${SF_SCHEMA}?warehouse=${SF_WAREHOUSE}"
+  #   read_only: true
+
+mcp:
+  transport: stdio
+  port: 3001  # Only used with HTTP transport
+
+logging:
+  level: info    # debug, info, warn, error
+  format: json   # json or text
