@@ -200,16 +200,13 @@ func (h *SystemHandler) CreateService(w http.ResponseWriter, r *http.Request) {
 		ConnMaxLifetime: svc.Pool.ConnMaxLifetime,
 		ConnMaxIdleTime: svc.Pool.ConnMaxIdleTime,
 	}
+	resp := serviceToMap(&svc)
 	if err := h.registry.Connect(svc.Name, cfg); err != nil {
 		// Service is persisted but connection failed — report it but don't fail the create.
-		writeJSON(w, http.StatusCreated, map[string]interface{}{
-			"service":            serviceToMap(&svc),
-			"connection_warning": "Service saved but connection failed: " + err.Error(),
-		})
-		return
+		resp["connection_warning"] = "Service saved but connection failed: " + err.Error()
 	}
 
-	writeJSON(w, http.StatusCreated, serviceToMap(&svc))
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // GetService returns a single service by name.
@@ -276,6 +273,8 @@ func (h *SystemHandler) UpdateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resp := serviceToMap(existing)
+
 	// Reconnect the service in the registry with updated config.
 	if existing.IsActive {
 		cfg := connector.ConnectionConfig{
@@ -289,18 +288,14 @@ func (h *SystemHandler) UpdateService(w http.ResponseWriter, r *http.Request) {
 			ConnMaxIdleTime: existing.Pool.ConnMaxIdleTime,
 		}
 		if err := h.registry.Connect(existing.Name, cfg); err != nil {
-			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"service":            serviceToMap(existing),
-				"connection_warning": "Service updated but reconnection failed: " + err.Error(),
-			})
-			return
+			resp["connection_warning"] = "Service updated but reconnection failed: " + err.Error()
 		}
 	} else {
 		// Service deactivated — disconnect from registry.
 		_ = h.registry.Disconnect(existing.Name)
 	}
 
-	writeJSON(w, http.StatusOK, serviceToMap(existing))
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // DeleteService removes a service and disconnects it.

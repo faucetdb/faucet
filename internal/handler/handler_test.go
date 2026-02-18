@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/faucetdb/faucet/internal/config"
+	"github.com/faucetdb/faucet/internal/connector"
 	"github.com/faucetdb/faucet/internal/model"
 	"github.com/faucetdb/faucet/internal/service"
 )
@@ -42,7 +43,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(func() { store.Close() })
 
 	authSvc := service.NewAuthService(store, testJWTSecret)
-	sysHandler := NewSystemHandler(store, authSvc)
+	sysHandler := NewSystemHandler(store, authSvc, connector.NewRegistry())
 
 	// Mount routes without auth middleware for direct handler testing.
 	r := chi.NewRouter()
