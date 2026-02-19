@@ -12,6 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mark3labs/mcp-go/mcp"
+
+	mcpClient "github.com/mark3labs/mcp-go/client"
+	mcpTransport "github.com/mark3labs/mcp-go/client/transport"
+
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
 	"github.com/faucetdb/faucet/internal/model"
@@ -1486,5 +1491,275 @@ func TestMCPEndpoint_InvalidMethod(t *testing.T) {
 	rr := env.doAuth(t, "PATCH", "/mcp", nil, token)
 	if rr.Code == http.StatusOK {
 		t.Errorf("PATCH /mcp should not return 200, got %d", rr.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// MCP end-to-end protocol tests using the mcp-go client library.
+// These verify the full flow: initialize → tool discovery → tool execution.
+// ---------------------------------------------------------------------------
+
+func TestMCPEndpoint_E2E_FullProtocolFlow(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t)
+	token := env.adminToken(t)
+
+	// Start a real HTTP server so the mcp-go client can connect
+	ts := httptest.NewServer(env.server.Router())
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create a Streamable HTTP MCP client with auth header
+	mcpClient, err := mcpClient.NewStreamableHttpClient(
+		ts.URL+"/mcp",
+		mcpTransport.WithHTTPHeaders(map[string]string{
+			"Authorization": "Bearer " + token,
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewStreamableHttpClient: %v", err)
+	}
+
+	// Start the transport
+	if err := mcpClient.Start(ctx); err != nil {
+		t.Fatalf("client.Start: %v", err)
+	}
+	defer mcpClient.Close()
+
+	// Step 1: Initialize
+	initReq := mcp.InitializeRequest{}
+	initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initReq.Params.ClientInfo = mcp.Implementation{
+		Name:    "e2e-test",
+		Version: "1.0.0",
+	}
+	initResult, err := mcpClient.Initialize(ctx, initReq)
+	if err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+
+	if initResult.ServerInfo.Name != "Faucet Database API" {
+		t.Errorf("ServerInfo.Name = %q, want %q", initResult.ServerInfo.Name, "Faucet Database API")
+	}
+	if initResult.ServerInfo.Version != "0.1.0" {
+		t.Errorf("ServerInfo.Version = %q, want %q", initResult.ServerInfo.Version, "0.1.0")
+	}
+
+	// Step 2: List tools
+	toolsResult, err := mcpClient.ListTools(ctx, mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+
+	if len(toolsResult.Tools) != 8 {
+		t.Errorf("got %d tools, want 8", len(toolsResult.Tools))
+	}
+
+	// Verify expected tool names are present
+	expectedTools := map[string]bool{
+		"faucet_list_services":  false,
+		"faucet_list_tables":    false,
+		"faucet_describe_table": false,
+		"faucet_query":          false,
+		"faucet_insert":         false,
+		"faucet_update":         false,
+		"faucet_delete":         false,
+		"faucet_raw_sql":        false,
+	}
+	for _, tool := range toolsResult.Tools {
+		if _, ok := expectedTools[tool.Name]; ok {
+			expectedTools[tool.Name] = true
+		}
+	}
+	for name, found := range expectedTools {
+		if !found {
+			t.Errorf("expected tool %q not found in tools/list", name)
+		}
+	}
+
+	// Step 3: Call faucet_list_services (should work even with no connected DBs)
+	callResult, err := mcpClient.CallTool(ctx, mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name:      "faucet_list_services",
+			Arguments: map[string]interface{}{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(faucet_list_services): %v", err)
+	}
+
+	if len(callResult.Content) == 0 {
+		t.Fatal("faucet_list_services returned no content")
+	}
+	// Content should be a TextContent item
+	if _, ok := callResult.Content[0].(mcp.TextContent); !ok {
+		t.Errorf("content[0] type = %T, want mcp.TextContent", callResult.Content[0])
+	}
+
+	// Step 4: List resources
+	resourcesResult, err := mcpClient.ListResources(ctx, mcp.ListResourcesRequest{})
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+
+	foundServicesResource := false
+	for _, r := range resourcesResult.Resources {
+		if r.URI == "faucet://services" {
+			foundServicesResource = true
+			if r.MIMEType != "application/json" {
+				t.Errorf("services resource MIMEType = %q, want %q", r.MIMEType, "application/json")
+			}
+		}
+	}
+	if !foundServicesResource {
+		t.Error("faucet://services resource not found in resources/list")
+	}
+
+	// Step 5: Read the services resource
+	readResult, err := mcpClient.ReadResource(ctx, mcp.ReadResourceRequest{
+		Params: mcp.ReadResourceParams{
+			URI: "faucet://services",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReadResource: %v", err)
+	}
+	if len(readResult.Contents) == 0 {
+		t.Fatal("ReadResource returned no contents")
+	}
+
+	// Step 6: Ping
+	if err := mcpClient.Ping(ctx); err != nil {
+		t.Fatalf("Ping: %v", err)
+	}
+}
+
+func TestMCPEndpoint_E2E_ToolAnnotations(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t)
+	token := env.adminToken(t)
+
+	ts := httptest.NewServer(env.server.Router())
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mcpC, err := mcpClient.NewStreamableHttpClient(
+		ts.URL+"/mcp",
+		mcpTransport.WithHTTPHeaders(map[string]string{
+			"Authorization": "Bearer " + token,
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewStreamableHttpClient: %v", err)
+	}
+	if err := mcpC.Start(ctx); err != nil {
+		t.Fatalf("client.Start: %v", err)
+	}
+	defer mcpC.Close()
+
+	initReq := mcp.InitializeRequest{}
+	initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initReq.Params.ClientInfo = mcp.Implementation{Name: "annotation-test", Version: "1.0.0"}
+	if _, err := mcpC.Initialize(ctx, initReq); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+
+	toolsResult, err := mcpC.ListTools(ctx, mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+
+	readOnlyTools := map[string]bool{
+		"faucet_list_services":  true,
+		"faucet_list_tables":    true,
+		"faucet_describe_table": true,
+		"faucet_query":          true,
+		"faucet_raw_sql":        true,
+	}
+	mutatingTools := map[string]bool{
+		"faucet_insert": true,
+		"faucet_update": true,
+		"faucet_delete": true,
+	}
+
+	for _, tool := range toolsResult.Tools {
+		if tool.Annotations.ReadOnlyHint == nil {
+			t.Errorf("tool %q has nil ReadOnlyHint annotation", tool.Name)
+			continue
+		}
+		if readOnlyTools[tool.Name] && !*tool.Annotations.ReadOnlyHint {
+			t.Errorf("tool %q should be read-only but ReadOnlyHint=false", tool.Name)
+		}
+		if mutatingTools[tool.Name] && *tool.Annotations.ReadOnlyHint {
+			t.Errorf("tool %q should be mutating but ReadOnlyHint=true", tool.Name)
+		}
+	}
+}
+
+func TestMCPEndpoint_E2E_APIKeyAuth(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t)
+
+	// Create role + API key
+	ctx := context.Background()
+	role := &model.Role{Name: "e2e-mcp", IsActive: true}
+	if err := env.store.CreateRole(ctx, role); err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+	rawKey := "faucet_e2e_mcp_test_key_1234567"
+	apiKey := &model.APIKey{
+		KeyHash:   config.HashAPIKey(rawKey),
+		KeyPrefix: rawKey[:15],
+		Label:     "e2e-mcp",
+		RoleID:    role.ID,
+		IsActive:  true,
+	}
+	if err := env.store.CreateAPIKey(ctx, apiKey); err != nil {
+		t.Fatalf("CreateAPIKey: %v", err)
+	}
+
+	ts := httptest.NewServer(env.server.Router())
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	// Connect with API key auth
+	mcpC, err := mcpClient.NewStreamableHttpClient(
+		ts.URL+"/mcp",
+		mcpTransport.WithHTTPHeaders(map[string]string{
+			"X-API-Key": rawKey,
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewStreamableHttpClient: %v", err)
+	}
+	if err := mcpC.Start(ctx); err != nil {
+		t.Fatalf("client.Start: %v", err)
+	}
+	defer mcpC.Close()
+
+	initReq := mcp.InitializeRequest{}
+	initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initReq.Params.ClientInfo = mcp.Implementation{Name: "apikey-test", Version: "1.0.0"}
+	result, err := mcpC.Initialize(ctx, initReq)
+	if err != nil {
+		t.Fatalf("Initialize with API key: %v", err)
+	}
+	if result.ServerInfo.Name != "Faucet Database API" {
+		t.Errorf("ServerInfo.Name = %q, want %q", result.ServerInfo.Name, "Faucet Database API")
+	}
+
+	// Verify we can list tools via API key auth
+	toolsResult, err := mcpC.ListTools(ctx, mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatalf("ListTools with API key: %v", err)
+	}
+	if len(toolsResult.Tools) != 8 {
+		t.Errorf("got %d tools via API key, want 8", len(toolsResult.Tools))
 	}
 }
