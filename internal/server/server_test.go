@@ -1318,3 +1318,173 @@ func TestMCPInfo_ToolStructure(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPInfo_EndpointField(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t)
+	token := env.adminToken(t)
+
+	rr := env.doAuth(t, "GET", "/api/v1/system/mcp", nil, token)
+	assertStatus(t, rr, http.StatusOK)
+
+	var resp map[string]interface{}
+	decodeJSON(t, rr, &resp)
+
+	// Verify mcp_endpoint field is present
+	endpoint, ok := resp["mcp_endpoint"].(string)
+	if !ok || endpoint == "" {
+		t.Error("expected non-empty mcp_endpoint field")
+	}
+
+	// Verify HTTP transport is first (prioritized)
+	transports, ok := resp["transports"].([]interface{})
+	if !ok || len(transports) < 2 {
+		t.Fatal("expected at least 2 transports")
+	}
+	first := transports[0].(map[string]interface{})
+	if first["type"] != "http" {
+		t.Errorf("first transport type = %v, want http (should be prioritized)", first["type"])
+	}
+	if first["endpoint"] == nil || first["endpoint"] == "" {
+		t.Error("http transport should have an endpoint field")
+	}
+
+	// Verify stdio transport is second
+	second := transports[1].(map[string]interface{})
+	if second["type"] != "stdio" {
+		t.Errorf("second transport type = %v, want stdio", second["type"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// MCP HTTP endpoint tests
+// ---------------------------------------------------------------------------
+
+func TestMCPEndpoint_Unauthenticated(t *testing.T) {
+	env := newTestEnv(t)
+
+	// POST to /mcp without auth should return 401
+	body := jsonBody(t, map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]interface{}{
+			"protocolVersion": "2025-03-26",
+			"capabilities":    map[string]interface{}{},
+			"clientInfo": map[string]interface{}{
+				"name":    "test",
+				"version": "1.0",
+			},
+		},
+	})
+	rr := env.do(t, "POST", "/mcp", body, nil)
+	assertStatus(t, rr, http.StatusUnauthorized)
+}
+
+func TestMCPEndpoint_WithAPIKey(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t)
+
+	// Create a role and API key
+	ctx := context.Background()
+	role := &model.Role{Name: "mcp-test", IsActive: true}
+	if err := env.store.CreateRole(ctx, role); err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	rawKey := "faucet_mcptest1234567890abcdefgh"
+	keyHash := config.HashAPIKey(rawKey)
+	apiKey := &model.APIKey{
+		KeyHash:   keyHash,
+		KeyPrefix: rawKey[:15],
+		Label:     "mcp-test",
+		RoleID:    role.ID,
+		IsActive:  true,
+	}
+	if err := env.store.CreateAPIKey(ctx, apiKey); err != nil {
+		t.Fatalf("CreateAPIKey: %v", err)
+	}
+
+	// POST MCP initialize with API key should succeed (not 401)
+	body := jsonBody(t, map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]interface{}{
+			"protocolVersion": "2025-03-26",
+			"capabilities":    map[string]interface{}{},
+			"clientInfo": map[string]interface{}{
+				"name":    "test",
+				"version": "1.0",
+			},
+		},
+	})
+	rr := env.doAPIKey(t, "POST", "/mcp", body, rawKey)
+
+	// Should not be 401 or 403 — the MCP handler should process it
+	if rr.Code == http.StatusUnauthorized || rr.Code == http.StatusForbidden {
+		t.Errorf("MCP endpoint returned %d with valid API key, expected 200", rr.Code)
+	}
+
+	// Should return a JSON-RPC response with server info
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err == nil {
+		if result, ok := resp["result"].(map[string]interface{}); ok {
+			if serverInfo, ok := result["serverInfo"].(map[string]interface{}); ok {
+				if serverInfo["name"] != "Faucet Database API" {
+					t.Errorf("serverInfo.name = %v, want Faucet Database API", serverInfo["name"])
+				}
+			}
+		}
+	}
+}
+
+func TestMCPEndpoint_WithJWT(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t)
+	token := env.adminToken(t)
+
+	// POST MCP initialize with admin JWT should succeed
+	body := jsonBody(t, map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]interface{}{
+			"protocolVersion": "2025-03-26",
+			"capabilities":    map[string]interface{}{},
+			"clientInfo": map[string]interface{}{
+				"name":    "test",
+				"version": "1.0",
+			},
+		},
+	})
+	rr := env.doAuth(t, "POST", "/mcp", body, token)
+
+	if rr.Code == http.StatusUnauthorized || rr.Code == http.StatusForbidden {
+		t.Errorf("MCP endpoint returned %d with valid JWT, expected 200", rr.Code)
+	}
+
+	// Should return JSON-RPC response
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v; body = %s", err, rr.Body.String())
+	}
+	if resp["jsonrpc"] != "2.0" {
+		t.Errorf("jsonrpc = %v, want 2.0", resp["jsonrpc"])
+	}
+	if resp["result"] == nil {
+		t.Error("expected result in JSON-RPC response")
+	}
+}
+
+func TestMCPEndpoint_InvalidMethod(t *testing.T) {
+	env := newTestEnv(t)
+	env.seedAdmin(t)
+	token := env.adminToken(t)
+
+	// PATCH /mcp should not be handled
+	rr := env.doAuth(t, "PATCH", "/mcp", nil, token)
+	if rr.Code == http.StatusOK {
+		t.Errorf("PATCH /mcp should not return 200, got %d", rr.Code)
+	}
+}

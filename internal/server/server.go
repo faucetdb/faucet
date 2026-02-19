@@ -19,6 +19,7 @@ import (
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
 	"github.com/faucetdb/faucet/internal/handler"
+	fmcp "github.com/faucetdb/faucet/internal/mcp"
 	"github.com/faucetdb/faucet/internal/server/middleware"
 	"github.com/faucetdb/faucet/internal/service"
 	"github.com/faucetdb/faucet/internal/ui"
@@ -96,6 +97,14 @@ func (s *Server) setupRouter() {
 
 	// --- OpenAPI combined spec (no auth required) ---
 	r.Get("/openapi.json", handler.NewOpenAPIHandler(s.registry, s.store).ServeCombinedSpec)
+
+	// --- MCP Streamable HTTP endpoint (remote AI agent access) ---
+	mcpSrv := fmcp.NewMCPServer(s.registry, s.store, s.logger)
+	mcpHandler := mcpSrv.HTTPHandler()
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Authenticate(s.authSvc))
+		r.Handle("/mcp", mcpHandler)
+	})
 
 	// --- API routes ---
 	r.Route("/api/v1", func(r chi.Router) {

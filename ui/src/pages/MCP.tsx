@@ -11,7 +11,8 @@ interface MCPTool {
 interface MCPTransport {
   type: string;
   description: string;
-  command: string;
+  command?: string;
+  endpoint?: string;
 }
 
 interface MCPResource {
@@ -29,6 +30,7 @@ interface MCPService {
 interface MCPInfoResponse {
   server_name: string;
   server_version: string;
+  mcp_endpoint: string;
   transports: MCPTransport[];
   tools: MCPTool[];
   resources: MCPResource[];
@@ -98,36 +100,67 @@ export function MCP() {
     );
   }
 
-  const faucetBinary = 'faucet';
+  // Derive endpoint from API response or current origin
+  const mcpEndpoint = info?.mcp_endpoint || `${window.location.origin}/mcp`;
 
-  const claudeDesktopConfig = JSON.stringify({
+  // --- Connection configs ---
+
+  // Remote HTTP: Claude Desktop
+  const claudeDesktopRemoteConfig = JSON.stringify({
     mcpServers: {
       faucet: {
-        command: faucetBinary,
+        url: mcpEndpoint,
+        headers: {
+          'X-API-Key': 'YOUR_API_KEY',
+        },
+      },
+    },
+  }, null, 2);
+
+  // Remote HTTP: Claude Code CLI
+  const claudeCodeRemoteCommand = `claude mcp add faucet --transport http "${mcpEndpoint}" --header "X-API-Key: YOUR_API_KEY"`;
+
+  // Remote HTTP: Cursor
+  const cursorRemoteConfig = JSON.stringify({
+    mcpServers: {
+      faucet: {
+        url: mcpEndpoint,
+        headers: {
+          'X-API-Key': 'YOUR_API_KEY',
+        },
+      },
+    },
+  }, null, 2);
+
+  // Remote HTTP: ChatGPT / OpenAI
+  const openaiConfig = `{
+  "type": "mcp",
+  "server_label": "faucet",
+  "server_url": "${mcpEndpoint}",
+  "headers": {
+    "X-API-Key": "YOUR_API_KEY"
+  }
+}`;
+
+  // Remote HTTP: generic curl test
+  const curlTestCommand = `curl -X POST ${mcpEndpoint} \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'`;
+
+  // Local stdio: Claude Desktop
+  const claudeDesktopStdioConfig = JSON.stringify({
+    mcpServers: {
+      faucet: {
+        command: 'faucet',
         args: ['mcp'],
       },
     },
   }, null, 2);
 
-  const claudeCodeCommand = `claude mcp add faucet -- ${faucetBinary} mcp`;
-
-  const cursorConfig = JSON.stringify({
-    mcpServers: {
-      faucet: {
-        command: faucetBinary,
-        args: ['mcp'],
-      },
-    },
-  }, null, 2);
-
-  const windmillConfig = JSON.stringify({
-    mcpServers: {
-      faucet: {
-        command: faucetBinary,
-        args: ['mcp', '--transport', 'http', '--port', '3001'],
-      },
-    },
-  }, null, 2);
+  // Local stdio: Claude Code CLI
+  const claudeCodeStdioCommand = `claude mcp add faucet -- faucet mcp`;
 
   return (
     <div class="space-y-6">
@@ -167,10 +200,25 @@ export function MCP() {
         <div class="lg:col-span-3">
           {activeSection === 'overview' && (
             <div class="space-y-6">
+              {/* Endpoint banner */}
+              <div class="card border-brand/30 bg-brand/5 space-y-3">
+                <div class="flex items-center gap-2">
+                  <div class="w-2.5 h-2.5 rounded-full bg-success animate-pulse" />
+                  <h2 class="text-base font-semibold text-text-primary">MCP Endpoint Active</h2>
+                </div>
+                <p class="text-sm text-text-secondary">
+                  AI tools can connect to your Faucet instance remotely via Streamable HTTP:
+                </p>
+                <CodeBlock code={mcpEndpoint} language="text" />
+                <p class="text-xs text-text-muted">
+                  Authenticate with an API key via the <code class="px-1 py-0.5 rounded bg-surface-overlay text-text-primary font-mono">X-API-Key</code> header or <code class="px-1 py-0.5 rounded bg-surface-overlay text-text-primary font-mono">Authorization: Bearer</code> token.
+                </p>
+              </div>
+
               {/* Status card */}
               <div class="card space-y-6">
                 <div>
-                  <h2 class="text-base font-semibold text-text-primary mb-1">MCP Server Status</h2>
+                  <h2 class="text-base font-semibold text-text-primary mb-1">Server Status</h2>
                   <p class="text-sm text-text-muted">
                     Faucet includes a built-in MCP server that exposes your databases as tools for AI agents.
                   </p>
@@ -196,9 +244,20 @@ export function MCP() {
               <div class="card space-y-4">
                 <h2 class="text-base font-semibold text-text-primary">What is MCP?</h2>
                 <p class="text-sm text-text-secondary leading-relaxed">
-                  The <span class="font-medium text-text-primary">Model Context Protocol</span> (MCP) is an open standard that lets AI assistants like Claude, Cursor, and Windsurf directly interact with external tools and data sources. Faucet's MCP server exposes your configured database services so AI agents can discover schemas, query data, and perform CRUD operations — all through a standardized interface.
+                  The <span class="font-medium text-text-primary">Model Context Protocol</span> (MCP) is an open standard that lets AI assistants like Claude, ChatGPT, Cursor, and Windsurf directly interact with external tools and data sources. Faucet's MCP server exposes your configured database services so AI agents can discover schemas, query data, and perform CRUD operations — all through a standardized interface.
                 </p>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div class="flex items-start gap-3 p-3 rounded-lg bg-surface border border-border-subtle">
+                    <div class="w-8 h-8 rounded-lg bg-brand/10 flex items-center justify-center shrink-0 mt-0.5">
+                      <svg class="w-4 h-4 text-brand" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M4.083 9h1.946c.089-1.546.383-2.97.837-4.118A6.004 6.004 0 004.083 9zM10 2a8 8 0 100 16 8 8 0 000-16zm0 2c-.076 0-.232.032-.465.262-.238.234-.497.623-.737 1.182-.389.907-.673 2.142-.766 3.556h3.936c-.093-1.414-.377-2.649-.766-3.556-.24-.56-.5-.948-.737-1.182C10.232 4.032 10.076 4 10 4zm3.971 5c-.089-1.546-.383-2.97-.837-4.118A6.004 6.004 0 0115.917 9h-1.946zm-2.003 2H8.032c.093 1.414.377 2.649.766 3.556.24.56.5.948.737 1.182.233.23.389.262.465.262.076 0 .232-.032.465-.262.238-.234.497-.623.737-1.182.389-.907.673-2.142.766-3.556zm1.166 4.118c.454-1.147.748-2.572.837-4.118h1.946a6.004 6.004 0 01-2.783 4.118zm-6.268 0C6.412 13.97 6.118 12.546 6.03 11H4.083a6.004 6.004 0 002.783 4.118z" clip-rule="evenodd" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p class="text-sm font-medium text-text-primary">Remote HTTP Access</p>
+                      <p class="text-xs text-text-muted">Connect any AI tool over the network — no CLI needed</p>
+                    </div>
+                  </div>
                   <div class="flex items-start gap-3 p-3 rounded-lg bg-surface border border-border-subtle">
                     <div class="w-8 h-8 rounded-lg bg-success/10 flex items-center justify-center shrink-0 mt-0.5">
                       <svg class="w-4 h-4 text-success" viewBox="0 0 20 20" fill="currentColor">
@@ -228,17 +287,6 @@ export function MCP() {
                       </svg>
                     </div>
                     <div>
-                      <p class="text-sm font-medium text-text-primary">Read-Only Mode</p>
-                      <p class="text-xs text-text-muted">Services can be locked to read-only access</p>
-                    </div>
-                  </div>
-                  <div class="flex items-start gap-3 p-3 rounded-lg bg-surface border border-border-subtle">
-                    <div class="w-8 h-8 rounded-lg bg-success/10 flex items-center justify-center shrink-0 mt-0.5">
-                      <svg class="w-4 h-4 text-success" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-                      </svg>
-                    </div>
-                    <div>
                       <p class="text-sm font-medium text-text-primary">Multi-Database</p>
                       <p class="text-xs text-text-muted">Expose PostgreSQL, MySQL, MSSQL, and Snowflake</p>
                     </div>
@@ -253,12 +301,18 @@ export function MCP() {
                   {info?.transports?.map((t) => (
                     <div key={t.type} class="p-4 rounded-lg bg-surface border border-border-subtle">
                       <div class="flex items-center gap-2 mb-2">
-                        <span class={`px-2 py-0.5 rounded text-xs font-mono font-medium ${t.type === 'stdio' ? 'bg-brand/10 text-brand' : 'bg-cyan-accent/10 text-cyan-accent'}`}>
+                        <span class={`px-2 py-0.5 rounded text-xs font-mono font-medium ${t.type === 'http' ? 'bg-brand/10 text-brand' : 'bg-surface-overlay text-text-secondary'}`}>
                           {t.type}
                         </span>
+                        {t.type === 'http' && (
+                          <span class="px-2 py-0.5 rounded text-xs font-medium bg-success/10 text-success">
+                            Recommended
+                          </span>
+                        )}
                         <span class="text-sm text-text-secondary">{t.description}</span>
                       </div>
-                      <CodeBlock code={t.command} language="bash" />
+                      {t.endpoint && <CodeBlock code={t.endpoint} language="text" />}
+                      {t.command && <CodeBlock code={t.command} language="bash" />}
                     </div>
                   ))}
                 </div>
@@ -268,7 +322,16 @@ export function MCP() {
 
           {activeSection === 'connect' && (
             <div class="space-y-6">
-              {/* Claude Desktop */}
+              {/* Quick start banner */}
+              <div class="card border-brand/30 bg-brand/5 space-y-2">
+                <h2 class="text-base font-semibold text-text-primary">Remote HTTP Endpoint</h2>
+                <p class="text-sm text-text-secondary">
+                  Faucet's MCP server is built into the main server — no separate process needed. Any MCP-compatible AI tool can connect over HTTP.
+                </p>
+                <CodeBlock code={mcpEndpoint} language="text" />
+              </div>
+
+              {/* Claude Desktop - Remote */}
               <div class="card space-y-4">
                 <div class="flex items-center gap-3">
                   <div class="w-10 h-10 rounded-lg bg-[#D97757]/10 flex items-center justify-center shrink-0">
@@ -278,19 +341,23 @@ export function MCP() {
                   </div>
                   <div>
                     <h2 class="text-base font-semibold text-text-primary">Claude Desktop</h2>
-                    <p class="text-sm text-text-muted">Add to your Claude Desktop configuration</p>
+                    <p class="text-sm text-text-muted">Connect via remote HTTP endpoint</p>
                   </div>
                 </div>
                 <p class="text-sm text-text-secondary">
-                  Add the following to your Claude Desktop config file. On macOS it's at{' '}
+                  Add the following to your Claude Desktop config file. On macOS:{' '}
                   <code class="px-1.5 py-0.5 rounded bg-surface-overlay text-text-primary text-xs font-mono">
                     ~/Library/Application Support/Claude/claude_desktop_config.json
                   </code>
                 </p>
-                <CodeBlock code={claudeDesktopConfig} language="json" />
+                <CodeBlock code={claudeDesktopRemoteConfig} language="json" />
+                <p class="text-xs text-text-muted">
+                  Replace <code class="font-mono">YOUR_API_KEY</code> with a Faucet API key from the{' '}
+                  <a href="/api-keys" class="text-brand hover:text-brand-light">API Keys</a> page.
+                </p>
               </div>
 
-              {/* Claude Code */}
+              {/* Claude Code CLI */}
               <div class="card space-y-4">
                 <div class="flex items-center gap-3">
                   <div class="w-10 h-10 rounded-lg bg-[#D97757]/10 flex items-center justify-center shrink-0">
@@ -300,13 +367,32 @@ export function MCP() {
                   </div>
                   <div>
                     <h2 class="text-base font-semibold text-text-primary">Claude Code (CLI)</h2>
-                    <p class="text-sm text-text-muted">Add via the Claude Code CLI</p>
+                    <p class="text-sm text-text-muted">Register via command line</p>
                   </div>
                 </div>
                 <p class="text-sm text-text-secondary">
-                  Run this command to register Faucet as an MCP server in Claude Code:
+                  Register Faucet as a remote MCP server:
                 </p>
-                <CodeBlock code={claudeCodeCommand} language="bash" />
+                <CodeBlock code={claudeCodeRemoteCommand} language="bash" />
+              </div>
+
+              {/* ChatGPT / OpenAI */}
+              <div class="card space-y-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-10 h-10 rounded-lg bg-[#10A37F]/10 flex items-center justify-center shrink-0">
+                    <svg class="w-5 h-5 text-[#10A37F]" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M10 2a8 8 0 100 16 8 8 0 000-16zM8.5 7.5a1.5 1.5 0 113 0v4a1.5 1.5 0 01-3 0v-4zm1.5 8a1 1 0 100-2 1 1 0 000 2z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 class="text-base font-semibold text-text-primary">ChatGPT / OpenAI</h2>
+                    <p class="text-sm text-text-muted">Use with the Responses API</p>
+                  </div>
+                </div>
+                <p class="text-sm text-text-secondary">
+                  Add Faucet as an MCP tool in your OpenAI Responses API calls:
+                </p>
+                <CodeBlock code={openaiConfig} language="json" />
               </div>
 
               {/* Cursor */}
@@ -328,30 +414,54 @@ export function MCP() {
                     ~/.cursor/mcp.json
                   </code>
                 </p>
-                <CodeBlock code={cursorConfig} language="json" />
+                <CodeBlock code={cursorRemoteConfig} language="json" />
               </div>
 
-              {/* HTTP mode */}
+              {/* Test with curl */}
               <div class="card space-y-4">
                 <div class="flex items-center gap-3">
-                  <div class="w-10 h-10 rounded-lg bg-cyan-accent/10 flex items-center justify-center shrink-0">
-                    <svg class="w-5 h-5 text-cyan-accent" viewBox="0 0 20 20" fill="currentColor">
-                      <path fill-rule="evenodd" d="M4.083 9h1.946c.089-1.546.383-2.97.837-4.118A6.004 6.004 0 004.083 9zM10 2a8 8 0 100 16 8 8 0 000-16zm0 2c-.076 0-.232.032-.465.262-.238.234-.497.623-.737 1.182-.389.907-.673 2.142-.766 3.556h3.936c-.093-1.414-.377-2.649-.766-3.556-.24-.56-.5-.948-.737-1.182C10.232 4.032 10.076 4 10 4zm3.971 5c-.089-1.546-.383-2.97-.837-4.118A6.004 6.004 0 0115.917 9h-1.946zm-2.003 2H8.032c.093 1.414.377 2.649.766 3.556.24.56.5.948.737 1.182.233.23.389.262.465.262.076 0 .232-.032.465-.262.238-.234.497-.623.737-1.182.389-.907.673-2.142.766-3.556zm1.166 4.118c.454-1.147.748-2.572.837-4.118h1.946a6.004 6.004 0 01-2.783 4.118zm-6.268 0C6.412 13.97 6.118 12.546 6.03 11H4.083a6.004 6.004 0 002.783 4.118z" clip-rule="evenodd" />
+                  <div class="w-10 h-10 rounded-lg bg-surface-overlay flex items-center justify-center shrink-0">
+                    <svg class="w-5 h-5 text-text-secondary" viewBox="0 0 20 20" fill="currentColor">
+                      <path fill-rule="evenodd" d="M2 5a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3.293 1.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L7.586 10 5.293 7.707a1 1 0 010-1.414zM11 12a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd" />
                     </svg>
                   </div>
                   <div>
-                    <h2 class="text-base font-semibold text-text-primary">HTTP / Remote Clients</h2>
-                    <p class="text-sm text-text-muted">Use Streamable HTTP transport for remote access</p>
+                    <h2 class="text-base font-semibold text-text-primary">Test with curl</h2>
+                    <p class="text-sm text-text-muted">Verify the endpoint is working</p>
                   </div>
                 </div>
                 <p class="text-sm text-text-secondary">
-                  For clients that support HTTP-based MCP, start Faucet in HTTP mode:
+                  Send an MCP initialize request to verify connectivity:
                 </p>
-                <CodeBlock code="faucet mcp --transport http --port 3001" language="bash" />
+                <CodeBlock code={curlTestCommand} language="bash" />
+              </div>
+
+              {/* Local stdio (collapsed / secondary) */}
+              <div class="card space-y-4 opacity-80">
+                <div class="flex items-center gap-3">
+                  <div class="w-10 h-10 rounded-lg bg-surface-overlay flex items-center justify-center shrink-0">
+                    <svg class="w-5 h-5 text-text-muted" viewBox="0 0 20 20" fill="currentColor">
+                      <path fill-rule="evenodd" d="M2 5a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3.293 1.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L7.586 10 5.293 7.707a1 1 0 010-1.414zM11 12a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 class="text-base font-semibold text-text-primary">Local Stdio Mode</h2>
+                    <p class="text-sm text-text-muted">For development or local-only setups</p>
+                  </div>
+                </div>
                 <p class="text-sm text-text-secondary">
-                  Then configure the client to connect to the MCP endpoint:
+                  If you prefer to run Faucet as a local subprocess (no network access needed):
                 </p>
-                <CodeBlock code={windmillConfig} language="json" />
+                <div class="space-y-3">
+                  <div>
+                    <p class="text-xs font-medium text-text-secondary mb-1">Claude Desktop (stdio)</p>
+                    <CodeBlock code={claudeDesktopStdioConfig} language="json" />
+                  </div>
+                  <div>
+                    <p class="text-xs font-medium text-text-secondary mb-1">Claude Code CLI (stdio)</p>
+                    <CodeBlock code={claudeCodeStdioCommand} language="bash" />
+                  </div>
+                </div>
               </div>
             </div>
           )}

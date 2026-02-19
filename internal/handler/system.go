@@ -786,19 +786,31 @@ func (h *SystemHandler) MCPInfo(w http.ResponseWriter, r *http.Request) {
 		{"uri": "faucet://schema/{service}", "description": "Full schema for a database service"},
 	}
 
+	// Derive the MCP endpoint URL from the incoming request.
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	host := r.Host
+	if fwd := r.Header.Get("X-Forwarded-Host"); fwd != "" {
+		host = fwd
+	}
+	mcpEndpoint := fmt.Sprintf("%s://%s/mcp", scheme, host)
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"server_name":    "Faucet Database API",
 		"server_version": "0.1.0",
+		"mcp_endpoint":   mcpEndpoint,
 		"transports": []map[string]interface{}{
 			{
-				"type":        "stdio",
-				"description": "Stdio transport for Claude Desktop, Claude Code, and other MCP clients",
-				"command":     "faucet mcp",
+				"type":        "http",
+				"description": "Streamable HTTP transport — embedded in the Faucet server, no extra process needed",
+				"endpoint":    mcpEndpoint,
 			},
 			{
-				"type":        "http",
-				"description": "Streamable HTTP transport for remote MCP clients",
-				"command":     "faucet mcp --transport http --port 3001",
+				"type":        "stdio",
+				"description": "Stdio transport for local MCP clients that launch Faucet as a subprocess",
+				"command":     "faucet mcp",
 			},
 		},
 		"tools":     tools,

@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"log/slog"
+	"net/http"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -63,9 +65,20 @@ func (s *MCPServer) ServeStdio() error {
 // ServeHTTP starts the MCP server in Streamable HTTP mode, listening on
 // the given address (e.g. ":3001"). This is suitable for remote MCP clients.
 func (s *MCPServer) ServeHTTP(addr string) error {
-	httpServer := server.NewStreamableHTTPServer(s.server)
+	httpServer := server.NewStreamableHTTPServer(s.server,
+		server.WithHeartbeatInterval(30*time.Second),
+	)
 	s.logger.Info("MCP HTTP server starting", "addr", addr)
 	return httpServer.Start(addr)
+}
+
+// HTTPHandler returns an http.Handler implementing the Streamable HTTP MCP
+// transport. This is suitable for mounting on an existing HTTP server/router
+// so the MCP endpoint runs alongside the REST API on the same port.
+func (s *MCPServer) HTTPHandler() http.Handler {
+	return server.NewStreamableHTTPServer(s.server,
+		server.WithHeartbeatInterval(30*time.Second),
+	)
 }
 
 // toolAnnotation returns a standard ToolAnnotation for read-only vs
