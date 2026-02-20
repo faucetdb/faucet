@@ -29,8 +29,8 @@ func NewOpenAPIHandler(registry *connector.Registry, store *config.Store) *OpenA
 }
 
 // ServeCombinedSpec returns a combined OpenAPI spec covering all registered
-// services. Each service's tables are namespaced under /api/v2/{serviceName}.
-// GET /api/v2/openapi.json
+// services. Each service's tables are namespaced under /api/v1/{serviceName}.
+// GET /api/v1/openapi.json
 func (h *OpenAPIHandler) ServeCombinedSpec(w http.ResponseWriter, r *http.Request) {
 	services, err := h.store.ListServices(r.Context())
 	if err != nil {
@@ -105,7 +105,7 @@ func (h *OpenAPIHandler) ServeCombinedSpec(w http.ResponseWriter, r *http.Reques
 }
 
 // ServeServiceSpec returns the OpenAPI spec for a single service.
-// GET /api/v2/{serviceName}/openapi.json
+// GET /api/v1/{serviceName}/openapi.json
 func (h *OpenAPIHandler) ServeServiceSpec(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
 
@@ -173,7 +173,7 @@ func buildServiceSpec(serviceName string, schema *model.Schema) (map[string]inte
 	paths := make(map[string]interface{})
 	schemas := make(map[string]interface{})
 
-	basePath := fmt.Sprintf("/api/v2/%s", serviceName)
+	basePath := fmt.Sprintf("/api/v1/%s", serviceName)
 
 	// Generate paths for each table.
 	for _, table := range schema.Tables {

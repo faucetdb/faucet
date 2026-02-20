@@ -30,7 +30,7 @@ func NewTableHandler(registry *connector.Registry, store *config.Store) *TableHa
 }
 
 // ListTableNames returns the names of all tables in the service's database.
-// GET /api/v2/{serviceName}/_table
+// GET /api/v1/{serviceName}/_table
 func (h *TableHandler) ListTableNames(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
 	conn, err := h.registry.Get(serviceName)
@@ -52,7 +52,7 @@ func (h *TableHandler) ListTableNames(w http.ResponseWriter, r *http.Request) {
 
 // QueryRecords retrieves records from a table with optional filtering,
 // sorting, field selection, and pagination.
-// GET /api/v2/{serviceName}/_table/{tableName}
+// GET /api/v1/{serviceName}/_table/{tableName}
 func (h *TableHandler) QueryRecords(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
@@ -138,7 +138,8 @@ func (h *TableHandler) QueryRecords(w http.ResponseWriter, r *http.Request) {
 	db := conn.DB()
 	rows, err := db.QueryxContext(r.Context(), sqlStr, allArgs...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Query failed: "+err.Error())
+		code, msg := classifyDBError(err, "Query failed")
+		writeError(w, code, msg)
 		return
 	}
 	defer rows.Close()
@@ -212,7 +213,7 @@ func (h *TableHandler) QueryRecords(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateRecords inserts one or more records into a table.
-// POST /api/v2/{serviceName}/_table/{tableName}
+// POST /api/v1/{serviceName}/_table/{tableName}
 func (h *TableHandler) CreateRecords(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
@@ -253,7 +254,8 @@ func (h *TableHandler) CreateRecords(w http.ResponseWriter, r *http.Request) {
 		// Execute with RETURNING to get the created records back.
 		rows, err := db.QueryxContext(r.Context(), sqlStr, args...)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Insert failed: "+err.Error())
+			code, msg := classifyDBError(err, "Insert failed")
+			writeError(w, code, msg)
 			return
 		}
 		defer rows.Close()
@@ -287,7 +289,8 @@ func (h *TableHandler) CreateRecords(w http.ResponseWriter, r *http.Request) {
 	// For connectors without RETURNING, execute and report rows affected.
 	result, err := db.ExecContext(r.Context(), sqlStr, args...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Insert failed: "+err.Error())
+		code, msg := classifyDBError(err, "Insert failed")
+		writeError(w, code, msg)
 		return
 	}
 
@@ -304,7 +307,7 @@ func (h *TableHandler) CreateRecords(w http.ResponseWriter, r *http.Request) {
 }
 
 // ReplaceRecords performs a full record replacement (PUT) on a table.
-// PUT /api/v2/{serviceName}/_table/{tableName}
+// PUT /api/v1/{serviceName}/_table/{tableName}
 func (h *TableHandler) ReplaceRecords(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
@@ -351,7 +354,8 @@ func (h *TableHandler) ReplaceRecords(w http.ResponseWriter, r *http.Request) {
 		if conn.SupportsReturning() {
 			rows, err := db.QueryxContext(r.Context(), sqlStr, args...)
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, "Update failed: "+err.Error())
+				code, msg := classifyDBError(err, "Update failed")
+				writeError(w, code, msg)
 				return
 			}
 			for rows.Next() {
@@ -368,7 +372,8 @@ func (h *TableHandler) ReplaceRecords(w http.ResponseWriter, r *http.Request) {
 		} else {
 			_, err := db.ExecContext(r.Context(), sqlStr, args...)
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, "Update failed: "+err.Error())
+				code, msg := classifyDBError(err, "Update failed")
+				writeError(w, code, msg)
 				return
 			}
 			updated = append(updated, record)
@@ -386,7 +391,7 @@ func (h *TableHandler) ReplaceRecords(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateRecords partially updates records matching a filter or ID list.
-// PATCH /api/v2/{serviceName}/_table/{tableName}
+// PATCH /api/v1/{serviceName}/_table/{tableName}
 func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
@@ -476,8 +481,14 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Merge filter params with query args.
-	allArgs := append(filterParams, args...)
+	// Merge args in SQL placeholder order: SET values, then filter params,
+	// then ID params. BuildUpdate returns [set_values..., id_values...],
+	// and filter params must be spliced between them.
+	numSetArgs := len(record)
+	allArgs := make([]interface{}, 0, len(args)+len(filterParams))
+	allArgs = append(allArgs, args[:numSetArgs]...)
+	allArgs = append(allArgs, filterParams...)
+	allArgs = append(allArgs, args[numSetArgs:]...)
 
 	db := conn.DB()
 	updated := make([]map[string]interface{}, 0)
@@ -485,7 +496,8 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 	if conn.SupportsReturning() {
 		rows, err := db.QueryxContext(r.Context(), sqlStr, allArgs...)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Update failed: "+err.Error())
+			code, msg := classifyDBError(err, "Update failed")
+			writeError(w, code, msg)
 			return
 		}
 		defer rows.Close()
@@ -506,7 +518,8 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 	} else {
 		result, err := db.ExecContext(r.Context(), sqlStr, allArgs...)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Update failed: "+err.Error())
+			code, msg := classifyDBError(err, "Update failed")
+			writeError(w, code, msg)
 			return
 		}
 		affected, _ := result.RowsAffected()
@@ -525,7 +538,7 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteRecords removes records matching a filter or ID list.
-// DELETE /api/v2/{serviceName}/_table/{tableName}
+// DELETE /api/v1/{serviceName}/_table/{tableName}
 func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
@@ -610,7 +623,8 @@ func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 	db := conn.DB()
 	result, err := db.ExecContext(r.Context(), sqlStr, allArgs...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Delete failed: "+err.Error())
+		code, msg := classifyDBError(err, "Delete failed")
+		writeError(w, code, msg)
 		return
 	}
 

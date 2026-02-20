@@ -19,6 +19,7 @@ import (
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
+	"github.com/faucetdb/faucet/internal/connector/sqlite"
 	"github.com/faucetdb/faucet/internal/model"
 	"github.com/faucetdb/faucet/internal/service"
 )
@@ -1761,5 +1762,195 @@ func TestMCPEndpoint_E2E_APIKeyAuth(t *testing.T) {
 	}
 	if len(toolsResult.Tools) != 8 {
 		t.Errorf("got %d tools via API key, want 8", len(toolsResult.Tools))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Data API integration tests (filter-based PATCH, error codes, CRUD)
+// ---------------------------------------------------------------------------
+
+// newTestEnvWithSQLite sets up a test environment with a real in-memory SQLite
+// database containing test tables and data.
+func newTestEnvWithSQLite(t *testing.T) (*testEnv, string) {
+	t.Helper()
+	env := newTestEnv(t)
+	env.seedAdmin(t)
+
+	// Register the sqlite driver and connect an in-memory database.
+	env.registry.RegisterDriver("sqlite", func() connector.Connector { return sqlite.New() })
+	if err := env.registry.Connect("testdb", connector.ConnectionConfig{
+		Driver: "sqlite",
+		DSN:    ":memory:",
+	}); err != nil {
+		t.Fatalf("connect sqlite: %v", err)
+	}
+
+	// Create a test table via raw SQL.
+	conn, _ := env.registry.Get("testdb")
+	db := conn.DB()
+	_, err := db.Exec(`
+		CREATE TABLE users (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			email TEXT UNIQUE NOT NULL,
+			city TEXT,
+			active INTEGER DEFAULT 1
+		);
+		INSERT INTO users (name, email, city, active) VALUES
+			('Alice', 'alice@example.com', 'New York', 1),
+			('Bob',   'bob@example.com',   'San Francisco', 1),
+			('Charlie', 'charlie@example.com', 'Chicago', 1);
+	`)
+	if err != nil {
+		t.Fatalf("seed data: %v", err)
+	}
+
+	// Create role + API key so we can test authenticated data access.
+	ctx := context.Background()
+	role := &model.Role{Name: "tester", IsActive: true}
+	if err := env.store.CreateRole(ctx, role); err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	rawKey := "faucet_sqltestkey1234567890abcdef"
+	apiKey := &model.APIKey{
+		KeyHash:   config.HashAPIKey(rawKey),
+		KeyPrefix: rawKey[:15],
+		Label:     "sql-test",
+		RoleID:    role.ID,
+		IsActive:  true,
+	}
+	if err := env.store.CreateAPIKey(ctx, apiKey); err != nil {
+		t.Fatalf("CreateAPIKey: %v", err)
+	}
+
+	// Also create a service record in config store (needed for service lookup).
+	svc := &model.ServiceConfig{
+		Name:     "testdb",
+		Driver:   "sqlite",
+		DSN:      ":memory:",
+		IsActive: true,
+	}
+	if err := env.store.CreateService(ctx, svc); err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+
+	return env, rawKey
+}
+
+func TestDataAPI_FilterBasedPATCH(t *testing.T) {
+	env, rawKey := newTestEnvWithSQLite(t)
+
+	// PATCH with filter: update city for users in Chicago to Houston
+	body := jsonBody(t, map[string]interface{}{
+		"city": "Houston",
+	})
+	rr := env.doAPIKey(t, "PATCH", "/api/v1/testdb/_table/users?filter=city%20%3D%20'Chicago'", body, rawKey)
+	assertStatus(t, rr, http.StatusOK)
+
+	var resp model.ListResponse
+	decodeJSON(t, rr, &resp)
+	if resp.Meta.Count != 1 {
+		t.Errorf("expected 1 updated row, got %d", resp.Meta.Count)
+	}
+
+	// Verify the update was applied correctly.
+	rr = env.doAPIKey(t, "GET", "/api/v1/testdb/_table/users?filter=city%20%3D%20'Houston'&fields=name,city", nil, rawKey)
+	assertStatus(t, rr, http.StatusOK)
+
+	decodeJSON(t, rr, &resp)
+	if resp.Meta.Count != 1 {
+		t.Errorf("expected 1 Houston user, got %d", resp.Meta.Count)
+	}
+	if len(resp.Resource) > 0 {
+		name, _ := resp.Resource[0]["name"].(string)
+		if name != "Charlie" {
+			t.Errorf("expected Charlie in Houston, got %q", name)
+		}
+	}
+}
+
+func TestDataAPI_IDBasedPATCH(t *testing.T) {
+	env, rawKey := newTestEnvWithSQLite(t)
+
+	// PATCH with ?ids=1: update Alice's city
+	body := jsonBody(t, map[string]interface{}{
+		"city": "Boston",
+	})
+	rr := env.doAPIKey(t, "PATCH", "/api/v1/testdb/_table/users?ids=1", body, rawKey)
+	assertStatus(t, rr, http.StatusOK)
+
+	var resp model.ListResponse
+	decodeJSON(t, rr, &resp)
+	if resp.Meta.Count != 1 {
+		t.Errorf("expected 1 updated row, got %d", resp.Meta.Count)
+	}
+}
+
+func TestDataAPI_ErrorCode_UniqueConstraint(t *testing.T) {
+	env, rawKey := newTestEnvWithSQLite(t)
+
+	// Try to insert a duplicate email.
+	body := jsonBody(t, map[string]interface{}{
+		"resource": []map[string]interface{}{
+			{"name": "Dup", "email": "alice@example.com"},
+		},
+	})
+	rr := env.doAPIKey(t, "POST", "/api/v1/testdb/_table/users", body, rawKey)
+	assertStatus(t, rr, http.StatusConflict)
+}
+
+func TestDataAPI_ErrorCode_NotNullConstraint(t *testing.T) {
+	env, rawKey := newTestEnvWithSQLite(t)
+
+	// Try to insert without required email field.
+	body := jsonBody(t, map[string]interface{}{
+		"resource": []map[string]interface{}{
+			{"name": "NoEmail"},
+		},
+	})
+	rr := env.doAPIKey(t, "POST", "/api/v1/testdb/_table/users", body, rawKey)
+	assertStatus(t, rr, http.StatusBadRequest)
+}
+
+func TestDataAPI_ErrorCode_TableNotFound(t *testing.T) {
+	env, rawKey := newTestEnvWithSQLite(t)
+
+	rr := env.doAPIKey(t, "GET", "/api/v1/testdb/_table/nonexistent", nil, rawKey)
+	assertStatus(t, rr, http.StatusNotFound)
+}
+
+func TestDataAPI_Pagination(t *testing.T) {
+	env, rawKey := newTestEnvWithSQLite(t)
+
+	// Get page 1 (limit=2, offset=0)
+	rr := env.doAPIKey(t, "GET", "/api/v1/testdb/_table/users?limit=2&offset=0&include_count=true", nil, rawKey)
+	assertStatus(t, rr, http.StatusOK)
+
+	var resp model.ListResponse
+	decodeJSON(t, rr, &resp)
+	if len(resp.Resource) != 2 {
+		t.Errorf("expected 2 records, got %d", len(resp.Resource))
+	}
+	if resp.Meta.Total == nil || *resp.Meta.Total != 3 {
+		t.Errorf("expected total=3, got %v", resp.Meta.Total)
+	}
+}
+
+func TestDataAPI_FilterDelete(t *testing.T) {
+	env, rawKey := newTestEnvWithSQLite(t)
+
+	// Delete users in San Francisco.
+	rr := env.doAPIKey(t, "DELETE", "/api/v1/testdb/_table/users?filter=city%20%3D%20'San%20Francisco'", nil, rawKey)
+	assertStatus(t, rr, http.StatusOK)
+
+	// Verify count is now 2.
+	rr = env.doAPIKey(t, "GET", "/api/v1/testdb/_table/users?include_count=true", nil, rawKey)
+	assertStatus(t, rr, http.StatusOK)
+
+	var resp model.ListResponse
+	decodeJSON(t, rr, &resp)
+	if resp.Meta.Total == nil || *resp.Meta.Total != 2 {
+		t.Errorf("expected 2 remaining users, got %v", resp.Meta.Total)
 	}
 }

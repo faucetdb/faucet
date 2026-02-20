@@ -183,8 +183,8 @@ func GenerateCombinedSpec(services []ServiceSpec, baseURL string) *openapi3.T {
 
 // addTablePaths generates all CRUD paths for a table in a single-service spec.
 func addTablePaths(doc *openapi3.T, serviceName string, table model.TableSchema) {
-	tablePath := fmt.Sprintf("/api/v2/%s/_table/%s", serviceName, table.Name)
-	schemaPath := fmt.Sprintf("/api/v2/%s/_schema/%s", serviceName, table.Name)
+	tablePath := fmt.Sprintf("/api/v1/%s/_table/%s", serviceName, table.Name)
+	schemaPath := fmt.Sprintf("/api/v1/%s/_schema/%s", serviceName, table.Name)
 	tag := table.Name
 
 	// Register component schemas
@@ -234,8 +234,8 @@ func addTablePaths(doc *openapi3.T, serviceName string, table model.TableSchema)
 
 // addViewPaths generates read-only paths for a view.
 func addViewPaths(doc *openapi3.T, serviceName string, view model.TableSchema) {
-	viewPath := fmt.Sprintf("/api/v2/%s/_table/%s", serviceName, view.Name)
-	schemaPath := fmt.Sprintf("/api/v2/%s/_schema/%s", serviceName, view.Name)
+	viewPath := fmt.Sprintf("/api/v1/%s/_table/%s", serviceName, view.Name)
+	schemaPath := fmt.Sprintf("/api/v1/%s/_schema/%s", serviceName, view.Name)
 	tag := view.Name
 
 	schemaName := sanitizeSchemaName(serviceName, view.Name)
@@ -276,7 +276,7 @@ func addProcedurePath(doc *openapi3.T, serviceName string, proc model.StoredProc
 	if proc.Type == "function" {
 		prefix = "_func"
 	}
-	procPath := fmt.Sprintf("/api/v2/%s/%s/%s", serviceName, prefix, proc.Name)
+	procPath := fmt.Sprintf("/api/v1/%s/%s/%s", serviceName, prefix, proc.Name)
 	tag := proc.Name
 
 	// Build request body schema from parameters

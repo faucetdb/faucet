@@ -23,7 +23,7 @@ func NewProcHandler(registry *connector.Registry) *ProcHandler {
 }
 
 // ListProcedures returns all stored procedures and functions for a service.
-// GET /api/v2/{serviceName}/_proc
+// GET /api/v1/{serviceName}/_proc
 func (h *ProcHandler) ListProcedures(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
 	conn, err := h.registry.Get(serviceName)
@@ -59,7 +59,7 @@ func (h *ProcHandler) ListProcedures(w http.ResponseWriter, r *http.Request) {
 
 // CallProcedure executes a stored procedure with the provided parameters and
 // returns the result set.
-// POST /api/v2/{serviceName}/_proc/{procName}
+// POST /api/v1/{serviceName}/_proc/{procName}
 func (h *ProcHandler) CallProcedure(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 

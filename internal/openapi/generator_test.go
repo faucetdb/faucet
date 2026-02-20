@@ -369,9 +369,9 @@ func TestGenerateServiceSpec_TablePaths(t *testing.T) {
 	schema := testSchema()
 	doc := GenerateServiceSpec("mydb", "My Database", "postgres", "http://localhost:8080", schema)
 
-	tablePath := doc.Paths.Find("/api/v2/mydb/_table/users")
+	tablePath := doc.Paths.Find("/api/v1/mydb/_table/users")
 	if tablePath == nil {
-		t.Fatal("Table path /api/v2/mydb/_table/users not found")
+		t.Fatal("Table path /api/v1/mydb/_table/users not found")
 	}
 
 	// Tables should have all CRUD operations
@@ -392,9 +392,9 @@ func TestGenerateServiceSpec_TablePaths(t *testing.T) {
 	}
 
 	// Check schema path exists too
-	schemaPath := doc.Paths.Find("/api/v2/mydb/_schema/users")
+	schemaPath := doc.Paths.Find("/api/v1/mydb/_schema/users")
 	if schemaPath == nil {
-		t.Error("Schema path /api/v2/mydb/_schema/users not found")
+		t.Error("Schema path /api/v1/mydb/_schema/users not found")
 	}
 }
 
@@ -402,9 +402,9 @@ func TestGenerateServiceSpec_ViewPaths(t *testing.T) {
 	schema := testSchema()
 	doc := GenerateServiceSpec("mydb", "My Database", "postgres", "http://localhost:8080", schema)
 
-	viewPath := doc.Paths.Find("/api/v2/mydb/_table/active_users")
+	viewPath := doc.Paths.Find("/api/v1/mydb/_table/active_users")
 	if viewPath == nil {
-		t.Fatal("View path /api/v2/mydb/_table/active_users not found")
+		t.Fatal("View path /api/v1/mydb/_table/active_users not found")
 	}
 
 	// Views should only have GET
@@ -430,18 +430,18 @@ func TestGenerateServiceSpec_ProcedurePaths(t *testing.T) {
 	doc := GenerateServiceSpec("mydb", "My Database", "postgres", "http://localhost:8080", schema)
 
 	// Procedure path
-	procPath := doc.Paths.Find("/api/v2/mydb/_proc/get_user_stats")
+	procPath := doc.Paths.Find("/api/v1/mydb/_proc/get_user_stats")
 	if procPath == nil {
-		t.Fatal("Procedure path /api/v2/mydb/_proc/get_user_stats not found")
+		t.Fatal("Procedure path /api/v1/mydb/_proc/get_user_stats not found")
 	}
 	if procPath.Post == nil {
 		t.Error("POST operation missing for procedure")
 	}
 
 	// Function path
-	funcPath := doc.Paths.Find("/api/v2/mydb/_func/calculate_total")
+	funcPath := doc.Paths.Find("/api/v1/mydb/_func/calculate_total")
 	if funcPath == nil {
-		t.Fatal("Function path /api/v2/mydb/_func/calculate_total not found")
+		t.Fatal("Function path /api/v1/mydb/_func/calculate_total not found")
 	}
 	if funcPath.Post == nil {
 		t.Error("POST operation missing for function")
@@ -596,7 +596,7 @@ func TestGenerateServiceSpec_ProcedureRequestBody(t *testing.T) {
 	schema := testSchema()
 	doc := GenerateServiceSpec("mydb", "My Database", "postgres", "http://localhost:8080", schema)
 
-	procPath := doc.Paths.Find("/api/v2/mydb/_proc/get_user_stats")
+	procPath := doc.Paths.Find("/api/v1/mydb/_proc/get_user_stats")
 	if procPath == nil || procPath.Post == nil {
 		t.Fatal("Procedure POST operation not found")
 	}
@@ -625,7 +625,7 @@ func TestGenerateServiceSpec_TableOperationTags(t *testing.T) {
 	schema := testSchema()
 	doc := GenerateServiceSpec("mydb", "My Database", "postgres", "http://localhost:8080", schema)
 
-	tablePath := doc.Paths.Find("/api/v2/mydb/_table/users")
+	tablePath := doc.Paths.Find("/api/v1/mydb/_table/users")
 	if tablePath == nil {
 		t.Fatal("Table path not found")
 	}
@@ -705,11 +705,11 @@ func TestGenerateCombinedSpec_CombinesMultipleServices(t *testing.T) {
 	}
 
 	// Paths should be namespaced by service name
-	if doc.Paths.Find("/api/v2/db1/_table/users") == nil {
-		t.Error("Path /api/v2/db1/_table/users not found")
+	if doc.Paths.Find("/api/v1/db1/_table/users") == nil {
+		t.Error("Path /api/v1/db1/_table/users not found")
 	}
-	if doc.Paths.Find("/api/v2/db2/_table/products") == nil {
-		t.Error("Path /api/v2/db2/_table/products not found")
+	if doc.Paths.Find("/api/v1/db2/_table/products") == nil {
+		t.Error("Path /api/v1/db2/_table/products not found")
 	}
 }
 
@@ -734,12 +734,12 @@ func TestGenerateCombinedSpec_SkipsNilSchema(t *testing.T) {
 	doc := GenerateCombinedSpec(services, "http://localhost:8080")
 
 	// db1 paths should exist
-	if doc.Paths.Find("/api/v2/db1/_table/users") == nil {
-		t.Error("Path /api/v2/db1/_table/users not found")
+	if doc.Paths.Find("/api/v1/db1/_table/users") == nil {
+		t.Error("Path /api/v1/db1/_table/users not found")
 	}
 
 	// db2 should have no paths since schema was nil
-	if doc.Paths.Find("/api/v2/db2/_table/users") != nil {
+	if doc.Paths.Find("/api/v1/db2/_table/users") != nil {
 		t.Error("Path from nil-schema service should not exist")
 	}
 }
@@ -779,12 +779,12 @@ func TestGenerateCombinedSpec_PathsNamespacedByService(t *testing.T) {
 	doc := GenerateCombinedSpec(services, "http://localhost:8080")
 
 	expectedPaths := []string{
-		"/api/v2/shop/_table/orders",
-		"/api/v2/shop/_schema/orders",
-		"/api/v2/shop/_table/order_summary",
-		"/api/v2/shop/_schema/order_summary",
-		"/api/v2/shop/_proc/process_order",
-		"/api/v2/shop/_func/order_total",
+		"/api/v1/shop/_table/orders",
+		"/api/v1/shop/_schema/orders",
+		"/api/v1/shop/_table/order_summary",
+		"/api/v1/shop/_schema/order_summary",
+		"/api/v1/shop/_proc/process_order",
+		"/api/v1/shop/_func/order_total",
 	}
 
 	for _, path := range expectedPaths {

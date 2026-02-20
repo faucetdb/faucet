@@ -27,7 +27,7 @@ func NewSchemaHandler(registry *connector.Registry, store *config.Store) *Schema
 
 // ListTables returns the full schema for a service's database, including all
 // tables, views, stored procedures, and functions.
-// GET /api/v2/{serviceName}/_schema
+// GET /api/v1/{serviceName}/_schema
 func (h *SchemaHandler) ListTables(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
 	conn, err := h.registry.Get(serviceName)
@@ -46,7 +46,7 @@ func (h *SchemaHandler) ListTables(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetTableSchema returns the detailed schema for a single table or view.
-// GET /api/v2/{serviceName}/_schema/{tableName}
+// GET /api/v1/{serviceName}/_schema/{tableName}
 func (h *SchemaHandler) GetTableSchema(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
 	tableName := chi.URLParam(r, "tableName")
@@ -68,7 +68,7 @@ func (h *SchemaHandler) GetTableSchema(w http.ResponseWriter, r *http.Request) {
 
 // CreateTable creates a new table in the service's database from a table
 // schema definition provided in the request body.
-// POST /api/v2/{serviceName}/_schema
+// POST /api/v1/{serviceName}/_schema
 func (h *SchemaHandler) CreateTable(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
 
@@ -121,7 +121,7 @@ func (h *SchemaHandler) CreateTable(w http.ResponseWriter, r *http.Request) {
 // AlterTable modifies an existing table's schema. The request body should
 // contain an array of schema changes (add_column, drop_column, rename_column,
 // modify_column).
-// PUT /api/v2/{serviceName}/_schema/{tableName}
+// PUT /api/v1/{serviceName}/_schema/{tableName}
 func (h *SchemaHandler) AlterTable(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
 	tableName := chi.URLParam(r, "tableName")
@@ -195,7 +195,7 @@ func (h *SchemaHandler) AlterTable(w http.ResponseWriter, r *http.Request) {
 }
 
 // DropTable removes a table from the service's database.
-// DELETE /api/v2/{serviceName}/_schema/{tableName}
+// DELETE /api/v1/{serviceName}/_schema/{tableName}
 func (h *SchemaHandler) DropTable(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
 	tableName := chi.URLParam(r, "tableName")

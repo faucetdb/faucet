@@ -55,7 +55,7 @@ type loginResponse struct {
 }
 
 // Login authenticates an admin user and returns a JWT session token.
-// POST /api/v2/system/admin/session
+// POST /api/v1/system/admin/session
 func (h *SystemHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := readJSON(r, &req); err != nil {
@@ -115,7 +115,7 @@ func (h *SystemHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 // Logout invalidates the current session. Since JWTs are stateless, this is
 // a no-op on the server side. Clients should discard their token.
-// DELETE /api/v2/system/admin/session
+// DELETE /api/v1/system/admin/session
 func (h *SystemHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -128,7 +128,7 @@ func (h *SystemHandler) Logout(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 // ListServices returns all configured database services.
-// GET /api/v2/system/service
+// GET /api/v1/system/service
 func (h *SystemHandler) ListServices(w http.ResponseWriter, r *http.Request) {
 	services, err := h.store.ListServices(r.Context())
 	if err != nil {
@@ -150,7 +150,7 @@ func (h *SystemHandler) ListServices(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateService registers a new database service.
-// POST /api/v2/system/service
+// POST /api/v1/system/service
 func (h *SystemHandler) CreateService(w http.ResponseWriter, r *http.Request) {
 	var svc model.ServiceConfig
 	if err := readJSON(r, &svc); err != nil {
@@ -210,7 +210,7 @@ func (h *SystemHandler) CreateService(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetService returns a single service by name.
-// GET /api/v2/system/service/{serviceName}
+// GET /api/v1/system/service/{serviceName}
 func (h *SystemHandler) GetService(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "serviceName")
 
@@ -228,7 +228,7 @@ func (h *SystemHandler) GetService(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateService modifies an existing service configuration.
-// PUT /api/v2/system/service/{serviceName}
+// PUT /api/v1/system/service/{serviceName}
 func (h *SystemHandler) UpdateService(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "serviceName")
 
@@ -299,7 +299,7 @@ func (h *SystemHandler) UpdateService(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteService removes a service and disconnects it.
-// DELETE /api/v2/system/service/{serviceName}
+// DELETE /api/v1/system/service/{serviceName}
 func (h *SystemHandler) DeleteService(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "serviceName")
 
@@ -328,7 +328,7 @@ func (h *SystemHandler) DeleteService(w http.ResponseWriter, r *http.Request) {
 }
 
 // TestConnection tests an active service's database connectivity by pinging it.
-// GET /api/v2/system/service/{serviceName}/test
+// GET /api/v1/system/service/{serviceName}/test
 func (h *SystemHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "serviceName")
 
@@ -374,7 +374,7 @@ func (h *SystemHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 // ListRoles returns all configured roles.
-// GET /api/v2/system/role
+// GET /api/v1/system/role
 func (h *SystemHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 	roles, err := h.store.ListRoles(r.Context())
 	if err != nil {
@@ -396,7 +396,7 @@ func (h *SystemHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateRole creates a new role.
-// POST /api/v2/system/role
+// POST /api/v1/system/role
 func (h *SystemHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 	var role model.Role
 	if err := readJSON(r, &role); err != nil {
@@ -431,7 +431,7 @@ func (h *SystemHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetRole returns a single role by ID.
-// GET /api/v2/system/role/{roleId}
+// GET /api/v1/system/role/{roleId}
 func (h *SystemHandler) GetRole(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "roleId")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -454,7 +454,7 @@ func (h *SystemHandler) GetRole(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateRole modifies an existing role.
-// PUT /api/v2/system/role/{roleId}
+// PUT /api/v1/system/role/{roleId}
 func (h *SystemHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "roleId")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -505,7 +505,7 @@ func (h *SystemHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteRole removes a role by ID.
-// DELETE /api/v2/system/role/{roleId}
+// DELETE /api/v1/system/role/{roleId}
 func (h *SystemHandler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "roleId")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -534,7 +534,7 @@ func (h *SystemHandler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 // ListAdmins returns all admin accounts.
-// GET /api/v2/system/admin
+// GET /api/v1/system/admin
 func (h *SystemHandler) ListAdmins(w http.ResponseWriter, r *http.Request) {
 	admins, err := h.store.ListAdmins(r.Context())
 	if err != nil {
@@ -556,7 +556,7 @@ func (h *SystemHandler) ListAdmins(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateAdmin creates a new admin account.
-// POST /api/v2/system/admin
+// POST /api/v1/system/admin
 func (h *SystemHandler) CreateAdmin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Email    string `json:"email"`
@@ -611,7 +611,7 @@ func (h *SystemHandler) CreateAdmin(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 // ListAPIKeys returns all configured API keys (without exposing the actual key).
-// GET /api/v2/system/api_key
+// GET /api/v1/system/api_key
 func (h *SystemHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	keys, err := h.store.ListAPIKeys(r.Context())
 	if err != nil {
@@ -662,7 +662,7 @@ type createAPIKeyResponse struct {
 
 // CreateAPIKey generates a new API key, hashes it, stores the hash, and
 // returns the plaintext key exactly once.
-// POST /api/v2/system/api_key
+// POST /api/v1/system/api_key
 func (h *SystemHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	var req createAPIKeyRequest
 	if err := readJSON(r, &req); err != nil {
@@ -725,7 +725,7 @@ func (h *SystemHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // RevokeAPIKey deactivates an API key by ID.
-// DELETE /api/v2/system/api_key/{keyId}
+// DELETE /api/v1/system/api_key/{keyId}
 func (h *SystemHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "keyId")
 	id, err := strconv.ParseInt(idStr, 10, 64)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/faucetdb/faucet/internal/model"
 )
@@ -73,6 +74,48 @@ func stringsToResources(key string, values []string) []map[string]interface{} {
 		out[i] = map[string]interface{}{key: v}
 	}
 	return out
+}
+
+// classifyDBError maps common database errors to appropriate HTTP status codes.
+// Returns (httpStatus, cleanMessage).
+func classifyDBError(err error, fallbackMsg string) (int, string) {
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+
+	switch {
+	// Unique constraint violations → 409 Conflict
+	case strings.Contains(lower, "unique constraint") ||
+		strings.Contains(lower, "duplicate key") ||
+		strings.Contains(lower, "duplicate entry") ||
+		strings.Contains(lower, "violation of unique"):
+		return http.StatusConflict, fallbackMsg + ": " + msg
+
+	// NOT NULL violations → 400 Bad Request
+	case strings.Contains(lower, "not null constraint") ||
+		strings.Contains(lower, "cannot insert null") ||
+		strings.Contains(lower, "null value in column") ||
+		strings.Contains(lower, "column cannot be null"):
+		return http.StatusBadRequest, fallbackMsg + ": " + msg
+
+	// Table/relation not found → 404
+	case strings.Contains(lower, "no such table") ||
+		strings.Contains(lower, "relation") && strings.Contains(lower, "does not exist") ||
+		strings.Contains(lower, "invalid object name") ||
+		strings.Contains(lower, "doesn't exist"):
+		return http.StatusNotFound, fallbackMsg + ": " + msg
+
+	// Foreign key violations → 400 Bad Request
+	case strings.Contains(lower, "foreign key") ||
+		strings.Contains(lower, "fk constraint"):
+		return http.StatusBadRequest, fallbackMsg + ": " + msg
+
+	// Check constraint → 400 Bad Request
+	case strings.Contains(lower, "check constraint"):
+		return http.StatusBadRequest, fallbackMsg + ": " + msg
+
+	default:
+		return http.StatusInternalServerError, fallbackMsg + ": " + msg
+	}
 }
 
 // clampInt constrains val to be within [min, max].
