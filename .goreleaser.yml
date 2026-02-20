@@ -49,11 +49,14 @@ brews:
     repository:
       owner: faucetdb
       name: homebrew-tap
-    homepage: "https://github.com/faucetdb/faucet"
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://faucet.dev"
     description: "Turn any database into a secure REST API. One binary. One command."
     license: "MIT"
     install: |
       bin.install "faucet"
+    test: |
+      system "#{bin}/faucet", "version"
 
 dockers:
   - image_templates:
