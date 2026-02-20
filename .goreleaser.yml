@@ -43,6 +43,38 @@ changelog:
       - "^test:"
       - "^ci:"
 
+dockers:
+  - id: amd64
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile.goreleaser
+    image_templates:
+      - "faucetdb/faucet:{{ .Version }}-amd64"
+      - "faucetdb/faucet:latest-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+
+  - id: arm64
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile.goreleaser
+    image_templates:
+      - "faucetdb/faucet:{{ .Version }}-arm64"
+      - "faucetdb/faucet:latest-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+
+docker_manifests:
+  - name_template: "faucetdb/faucet:{{ .Version }}"
+    image_templates:
+      - "faucetdb/faucet:{{ .Version }}-amd64"
+      - "faucetdb/faucet:{{ .Version }}-arm64"
+
+  - name_template: "faucetdb/faucet:latest"
+    image_templates:
+      - "faucetdb/faucet:latest-amd64"
+      - "faucetdb/faucet:latest-arm64"
+
 brews:
   - name: faucet
     repository:
