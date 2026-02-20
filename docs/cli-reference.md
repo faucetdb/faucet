@@ -11,6 +11,7 @@ faucet <command> [subcommand] [flags]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--config` | `./faucet.yaml` | Path to config file |
+| `--data-dir` | `~/.faucet` | Data directory for SQLite config database |
 
 ## faucet serve
 
@@ -28,7 +29,6 @@ faucet serve [flags]
 | `--host` | | `0.0.0.0` | HTTP listen host |
 | `--no-ui` | | `false` | Disable the embedded admin UI |
 | `--dev` | | `false` | Enable development mode (verbose logging, CORS *) |
-| `--data-dir` | | `~/.faucet` | Data directory for SQLite config database |
 
 **Examples:**
 
@@ -73,6 +73,41 @@ faucet serve --host 127.0.0.1 --port 8080
 
 ---
 
+## faucet config
+
+Manage the Faucet configuration file.
+
+### faucet config init
+
+Create a default `faucet.yaml` configuration file in the current directory.
+
+```bash
+faucet config init [flags]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Overwrite existing config file |
+
+**Example:**
+
+```bash
+faucet config init
+faucet config init --force
+```
+
+### faucet config show
+
+Display the current effective configuration.
+
+```bash
+faucet config show
+```
+
+---
+
 ## faucet db
 
 Manage database connections. Aliases: `service`, `database`.
@@ -90,10 +125,11 @@ faucet db add [flags]
 | Flag | Description |
 |------|-------------|
 | `--name` | Service name (unique identifier) |
-| `--driver` | Database driver: `postgres`, `mysql`, `mssql`, `snowflake` |
+| `--driver` | Database driver: `postgres`, `mysql`, `mssql`, `snowflake`, `sqlite` |
 | `--dsn` | Data source name / connection string |
 | `--label` | Human-readable label (defaults to name) |
 | `--schema` | Database schema to expose (default depends on driver) |
+| `--private-key-path` | Path to private key file (for Snowflake key-pair auth) |
 
 **Examples:**
 
@@ -309,10 +345,10 @@ faucet role list [flags]
 **Example output:**
 
 ```
-NAME                 DESCRIPTION                              ACTIVE
-----                 -----------                              ------
-readonly             Read-only access to all services         yes
-admin                Full access                              yes
+NAME                 DESCRIPTION                              ACTIVE   RULES
+----                 -----------                              ------   -----
+readonly             Read-only access to all services         yes      2 rule(s): mydb
+admin                Full access                              yes      0 rule(s)
 ```
 
 ---
@@ -382,7 +418,6 @@ faucet mcp [flags]
 |------|---------|-------------|
 | `--transport` | `stdio` | Transport mode: `stdio` or `http` |
 | `--port` | `3001` | HTTP port (only used with `--transport http`) |
-| `--data-dir` | `~/.faucet` | Data directory for SQLite config |
 
 **Examples:**
 
@@ -415,6 +450,7 @@ faucet openapi [service] [flags]
 |------|-------|-------------|
 | `--all` | | Generate combined spec for all services |
 | `--output` | `-o` | Write spec to file instead of stdout |
+| `--base-url` | | Base URL for the API server (default `http://localhost:8080`) |
 
 **Examples:**
 

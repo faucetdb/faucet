@@ -149,17 +149,6 @@ curl -X DELETE "http://localhost:8080/api/v1/mydb/_table/customers?ids=1" \
 
 The `parseTime=true` parameter is strongly recommended. Without it, MySQL DATE and DATETIME columns are returned as byte strings instead of proper timestamps.
 
-### Upsert support
-
-MySQL supports upsert via ON DUPLICATE KEY UPDATE:
-
-```bash
-curl -X POST "http://localhost:8080/api/v1/mydb/_table/customers?upsert=true" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"resource": [{"id": 1, "name": "Updated Name", "email": "new@example.com"}]}'
-```
-
 ### Stored procedures
 
 Faucet can execute MySQL stored procedures:

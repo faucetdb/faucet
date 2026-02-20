@@ -157,17 +157,6 @@ curl -X DELETE "http://localhost:8080/api/v1/mydb/_table/customers?ids=42" \
 
 PostgreSQL fully supports RETURNING. INSERT and UPDATE responses include the actual row data with server-generated values (serial IDs, defaults, triggers).
 
-### Upsert support
-
-PostgreSQL supports upsert via ON CONFLICT:
-
-```bash
-curl -X POST "http://localhost:8080/api/v1/mydb/_table/customers?upsert=true" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"resource": [{"id": 42, "name": "Updated Name", "email": "new@example.com"}]}'
-```
-
 ### Schema selection
 
 PostgreSQL organizes tables into schemas. The default is `public`. To use a different schema:

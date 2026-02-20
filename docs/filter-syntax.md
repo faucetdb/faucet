@@ -208,10 +208,10 @@ Use parentheses to control operator grouping:
 
 ```
 # Without parentheses: A AND B OR C = (A AND B) OR C
-filter=active = true AND type = 'user' OR role = 'admin'
+filter=active = 1 AND type = 'user' OR role = 'admin'
 
 # With parentheses: A AND (B OR C)
-filter=active = true AND (type = 'user' OR role = 'admin')
+filter=active = 1 AND (type = 'user' OR role = 'admin')
 
 # Nested parentheses
 filter=(status = 'active' OR status = 'trial') AND (age >= 18 AND age <= 65)
@@ -292,6 +292,7 @@ The filter parser generates parameterized SQL using the appropriate placeholder 
 | MySQL | `?, ?, ?` | `age > ? AND status = ?` |
 | SQL Server | `@p1, @p2, @p3` | `age > @p1 AND status = @p2` |
 | Snowflake | `?, ?, ?` | `age > ? AND status = ?` |
+| SQLite | `?, ?, ?` | `age > ? AND status = ?` |
 
 This is handled automatically. You write the same filter syntax regardless of the backend database.
 

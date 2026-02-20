@@ -144,7 +144,7 @@ Note: Snowflake does not support RETURNING, so the response echoes back the subm
 curl -X PATCH "http://localhost:8080/api/v1/analytics/_table/CUSTOMERS?filter=NAME%20%3D%20'Acme%20Corp'" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"resource": [{"REGION": "US-EAST"}]}'
+  -d '{"REGION": "US-EAST"}'
 ```
 
 ## Key Pair (JWT) Authentication

@@ -22,7 +22,7 @@ go install github.com/faucetdb/faucet/cmd/faucet@latest
 
 ```bash
 docker pull faucetdb/faucet:latest
-docker run -p 8080:8080 faucetdb/faucet:latest
+docker run -p 8080:8080 -v faucet-data:/data faucetdb/faucet:latest
 ```
 
 ### Binary Download
@@ -69,12 +69,12 @@ Output:
 | |_ / _ \| |_| | (__|  _| | |
 |_| /_/ \_\___,_|\___|___| |_|
 
--> Faucet v0.1.0
--> Listening on http://0.0.0.0:8080
--> Admin UI:   http://0.0.0.0:8080/admin
--> OpenAPI:    http://0.0.0.0:8080/openapi.json
--> Health:     http://0.0.0.0:8080/healthz
--> Connected databases: 0
+→ Faucet v0.1.0
+→ Listening on http://0.0.0.0:8080
+→ Admin UI:   http://0.0.0.0:8080/admin
+→ OpenAPI:    http://0.0.0.0:8080/openapi.json
+→ Health:     http://0.0.0.0:8080/healthz
+→ Connected databases: 0
 ```
 
 ### 2. Create an Admin Account
@@ -131,7 +131,7 @@ curl "http://localhost:8080/api/v1/mydb/_table/users?limit=10" \
 curl -X POST http://localhost:8080/api/v1/mydb/_table/users \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"resource": [{"name": "Alice", "email": "alice@example.com"}]}'
+  -d '{"name": "Alice", "email": "alice@example.com"}'
 
 # Filter records
 curl "http://localhost:8080/api/v1/mydb/_table/users?filter=name%20%3D%20'Alice'" \

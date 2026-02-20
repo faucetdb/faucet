@@ -96,7 +96,6 @@ All list endpoints return a `resource` array with optional `meta` for pagination
 | `total` | integer | Total matching records (only when `include_count=true`) |
 | `limit` | integer | Maximum records per page |
 | `offset` | integer | Number of records skipped |
-| `next_cursor` | string | Cursor for next page (when using cursor pagination) |
 | `took_ms` | float | Query execution time in milliseconds |
 
 ### Success (single)
@@ -140,10 +139,16 @@ Liveness probe. Returns 200 if the process is running.
 
 ### GET /readyz
 
-Readiness probe. Returns 200 when the server is ready to accept traffic.
+Readiness probe. Returns 200 when the server is ready to accept traffic. Pings all database services and reports their status. Returns 503 if any service is unhealthy.
 
 ```json
-{"status": "ok"}
+{
+  "status": "ok",
+  "checks": {
+    "mydb": "ok",
+    "analytics": "ok"
+  }
+}
 ```
 
 ### GET /openapi.json
@@ -382,6 +387,27 @@ Save the `api_key` value immediately. It cannot be retrieved after this response
 
 Revoke (deactivate) an API key by ID.
 
+### Connection Testing
+
+#### GET /api/v1/system/service/{serviceName}/test
+
+Test connectivity to a database service by pinging it.
+
+**Response (200):**
+
+```json
+{
+  "success": true,
+  "message": "Connection successful"
+}
+```
+
+### MCP Configuration
+
+#### GET /api/v1/system/mcp
+
+Returns MCP server configuration, available tools, resources, and transports.
+
 ---
 
 ## Table CRUD Endpoints
@@ -612,27 +638,48 @@ Get the detailed schema for a single table.
 ```json
 {
   "name": "users",
+  "type": "table",
+  "primary_key": ["id"],
   "columns": [
     {
       "name": "id",
-      "type": "integer",
+      "position": 1,
+      "db_type": "integer",
+      "go_type": "int32",
+      "json_type": "integer",
+      "nullable": false,
       "is_primary_key": true,
-      "is_nullable": false,
+      "is_auto_increment": true,
+      "is_unique": false,
       "default": "nextval('users_id_seq'::regclass)"
     },
     {
       "name": "name",
-      "type": "character varying(255)",
+      "position": 2,
+      "db_type": "character varying",
+      "go_type": "string",
+      "json_type": "string",
+      "nullable": false,
+      "max_length": 255,
       "is_primary_key": false,
-      "is_nullable": false
+      "is_auto_increment": false,
+      "is_unique": false
     },
     {
       "name": "email",
-      "type": "character varying(255)",
+      "position": 3,
+      "db_type": "character varying",
+      "go_type": "string",
+      "json_type": "string",
+      "nullable": true,
+      "max_length": 255,
       "is_primary_key": false,
-      "is_nullable": true
+      "is_auto_increment": false,
+      "is_unique": true
     }
-  ]
+  ],
+  "foreign_keys": [],
+  "indexes": []
 }
 ```
 

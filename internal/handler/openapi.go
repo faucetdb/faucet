@@ -86,7 +86,7 @@ func (h *OpenAPIHandler) ServeCombinedSpec(w http.ResponseWriter, r *http.Reques
 				"apiKey": map[string]interface{}{
 					"type": "apiKey",
 					"in":   "header",
-					"name": "X-DreamFactory-API-Key",
+					"name": "X-API-Key",
 				},
 				"bearer": map[string]interface{}{
 					"type":         "http",
@@ -105,7 +105,7 @@ func (h *OpenAPIHandler) ServeCombinedSpec(w http.ResponseWriter, r *http.Reques
 }
 
 // ServeServiceSpec returns the OpenAPI spec for a single service.
-// GET /api/v1/{serviceName}/openapi.json
+// GET /api/v1/{serviceName}/_doc
 func (h *OpenAPIHandler) ServeServiceSpec(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
 
@@ -145,7 +145,7 @@ func (h *OpenAPIHandler) ServeServiceSpec(w http.ResponseWriter, r *http.Request
 				"apiKey": map[string]interface{}{
 					"type": "apiKey",
 					"in":   "header",
-					"name": "X-DreamFactory-API-Key",
+					"name": "X-API-Key",
 				},
 				"bearer": map[string]interface{}{
 					"type":         "http",

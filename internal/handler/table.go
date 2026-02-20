@@ -69,6 +69,7 @@ func (h *TableHandler) QueryRecords(w http.ResponseWriter, r *http.Request) {
 	filterStr := queryString(r, "filter")
 	fieldsStr := queryString(r, "fields")
 	orderStr := queryString(r, "order")
+	idsStr := queryString(r, "ids")
 	limit := clampInt(queryInt(r, "limit", 25), 0, 1000)
 	offset := queryInt(r, "offset", 0)
 	includeCount := queryBool(r, "include_count")
@@ -98,6 +99,22 @@ func (h *TableHandler) QueryRecords(w http.ResponseWriter, r *http.Request) {
 		if parsed != nil {
 			filterSQL = parsed.SQL
 			filterParams = parsed.Params
+		}
+	}
+
+	// Apply IDs filter if provided (filters by primary key "id" column).
+	if idsStr != "" {
+		idParts := strings.Split(idsStr, ",")
+		placeholders := make([]string, len(idParts))
+		for i, id := range idParts {
+			placeholders[i] = conn.ParameterPlaceholder(len(filterParams) + i + 1)
+			filterParams = append(filterParams, strings.TrimSpace(id))
+		}
+		idClause := fmt.Sprintf("%s IN (%s)", conn.QuoteIdentifier("id"), strings.Join(placeholders, ", "))
+		if filterSQL != "" {
+			filterSQL = filterSQL + " AND " + idClause
+		} else {
+			filterSQL = idClause
 		}
 	}
 

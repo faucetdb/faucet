@@ -4,7 +4,7 @@ This guide is for AI agents and LLMs that want to interact with databases throug
 
 ## Quick Context for LLMs
 
-Faucet is a database-to-API gateway. You point it at SQL databases (PostgreSQL, MySQL, SQL Server, Snowflake) and it generates REST APIs automatically. You can interact with these APIs via:
+Faucet is a database-to-API gateway. You point it at SQL databases (PostgreSQL, MySQL, SQL Server, Snowflake, SQLite) and it generates REST APIs automatically. You can interact with these APIs via:
 
 1. **MCP tools** (recommended) — structured, validated tool calls
 2. **REST API** — standard HTTP with JSON payloads

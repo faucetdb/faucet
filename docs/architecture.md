@@ -34,7 +34,8 @@ faucet/
 │   │   ├── postgres/         # PostgreSQL connector
 │   │   ├── mysql/            # MySQL connector
 │   │   ├── mssql/            # SQL Server connector
-│   │   └── snowflake/        # Snowflake connector
+│   │   ├── snowflake/        # Snowflake connector
+│   │   └── sqlite/           # SQLite connector
 │   ├── handler/
 │   │   ├── system.go         # System API handlers (services, roles, admins, keys)
 │   │   ├── table.go          # Table CRUD handlers

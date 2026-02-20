@@ -11,14 +11,13 @@ docker run -d \
   --name faucet \
   -p 8080:8080 \
   -v faucet-data:/data \
-  faucetdb/faucet:latest \
-  serve --host 0.0.0.0 --data-dir /data
+  faucetdb/faucet:latest
 ```
 
 ### Docker Compose
 
 ```yaml
-version: "3.8"
+version: "3.9"
 
 services:
   faucet:
@@ -27,13 +26,8 @@ services:
       - "8080:8080"
     volumes:
       - faucet-data:/data
-    command: ["serve", "--host", "0.0.0.0", "--data-dir", "/data"]
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+    # The image has a built-in HEALTHCHECK, no need to override
 
 volumes:
   faucet-data:
@@ -53,24 +47,34 @@ COPY ui/ ./
 RUN npm run build
 
 # Stage 2: Build Go binary
-FROM golang:1.24-alpine AS go-builder
+FROM golang:1.25-alpine AS go-builder
 RUN apk add --no-cache git
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=ui-builder /app/ui/dist ./internal/ui/dist
+COPY --from=ui-builder /app/internal/ui/dist ./internal/ui/dist
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X main.version=$(git describe --tags --always 2>/dev/null || echo dev)" \
     -o /faucet ./cmd/faucet
 
-# Stage 3: Final image (scratch for minimal size)
-FROM scratch
-COPY --from=go-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=go-builder /faucet /faucet
+# Stage 3: Final image (alpine for shell access + minimal size)
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates
+COPY --from=go-builder /faucet /usr/local/bin/faucet
+
+RUN addgroup -S faucet && adduser -S faucet -G faucet
+RUN mkdir -p /data && chown faucet:faucet /data
+
+ENV FAUCET_DATA_DIR=/data
 EXPOSE 8080
 VOLUME /data
-ENTRYPOINT ["/faucet"]
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD wget --spider -q http://localhost:8080/healthz || exit 1
+
+USER faucet
+ENTRYPOINT ["faucet"]
 CMD ["serve", "--host", "0.0.0.0"]
 ```
 
@@ -80,7 +84,7 @@ Build it:
 docker build -t faucet:custom .
 ```
 
-The final image is built `FROM scratch` -- it contains only the binary and CA certificates, resulting in an image under 20 MB.
+The final image is built `FROM alpine:3.21` with a non-root `faucet` user, a built-in health check, and `FAUCET_DATA_DIR=/data` preconfigured. Data persists across restarts via the `/data` volume.
 
 ---
 

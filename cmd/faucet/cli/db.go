@@ -33,11 +33,12 @@ func newDBCmd() *cobra.Command {
 
 func newDBAddCmd() *cobra.Command {
 	var (
-		name   string
-		driver string
-		dsn    string
-		label  string
-		schema string
+		name           string
+		driver         string
+		dsn            string
+		label          string
+		schema         string
+		privateKeyPath string
 	)
 
 	cmd := &cobra.Command{
@@ -48,9 +49,10 @@ or omit them to be prompted interactively.
 
 Supported drivers: postgres, mysql, mssql, snowflake, sqlite`,
 		Example: `  faucet db add --name mydb --driver postgres --dsn "postgres://user:pass@localhost/mydb"
+  faucet db add --name analytics --driver snowflake --dsn "USER@org-account/DB/SCHEMA" --private-key-path /path/to/key.p8
   faucet db add  # interactive mode`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDBAdd(name, driver, dsn, label, schema)
+			return runDBAdd(name, driver, dsn, label, schema, privateKeyPath)
 		},
 	}
 
@@ -59,11 +61,12 @@ Supported drivers: postgres, mysql, mssql, snowflake, sqlite`,
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Data source name / connection string")
 	cmd.Flags().StringVar(&label, "label", "", "Human-readable label (defaults to name)")
 	cmd.Flags().StringVar(&schema, "schema", "", "Database schema to expose (default depends on driver)")
+	cmd.Flags().StringVar(&privateKeyPath, "private-key-path", "", "Path to private key file (for Snowflake key-pair auth)")
 
 	return cmd
 }
 
-func runDBAdd(name, driver, dsn, label, schema string) error {
+func runDBAdd(name, driver, dsn, label, schema, privateKeyPath string) error {
 	// Interactive prompts when flags are missing
 	if name == "" {
 		fmt.Print("Service name: ")
@@ -102,13 +105,14 @@ func runDBAdd(name, driver, dsn, label, schema string) error {
 	ctx := context.Background()
 
 	svc := &model.ServiceConfig{
-		Name:     name,
-		Label:    label,
-		Driver:   driver,
-		DSN:      dsn,
-		Schema:   schema,
-		IsActive: true,
-		Pool:     model.DefaultPoolConfig(),
+		Name:           name,
+		Label:          label,
+		Driver:         driver,
+		DSN:            dsn,
+		PrivateKeyPath: privateKeyPath,
+		Schema:         schema,
+		IsActive:       true,
+		Pool:           model.DefaultPoolConfig(),
 	}
 
 	if err := store.CreateService(ctx, svc); err != nil {

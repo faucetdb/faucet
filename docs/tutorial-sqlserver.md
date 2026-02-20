@@ -157,17 +157,6 @@ curl -X DELETE "http://localhost:8080/api/v1/mydb/_table/Customers?ids=42" \
 
 SQL Server uses OUTPUT INSERTED.* instead of RETURNING. Faucet handles this transparently -- INSERT and UPDATE responses include the actual row data.
 
-### Upsert support
-
-SQL Server supports upsert via MERGE:
-
-```bash
-curl -X POST "http://localhost:8080/api/v1/mydb/_table/Customers?upsert=true" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"resource": [{"Id": 42, "Name": "Updated Name", "Email": "new@example.com"}]}'
-```
-
 ### Schema selection
 
 SQL Server defaults to the `dbo` schema. To use a different schema:
