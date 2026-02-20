@@ -198,6 +198,12 @@ func (s *Server) setupRouter() {
 			r.Get("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
 				fileServer.ServeHTTP(w, r)
 			})
+			r.Get("/faucet-icon.svg", func(w http.ResponseWriter, r *http.Request) {
+				fileServer.ServeHTTP(w, r)
+			})
+			r.Get("/faucet-logo.svg", func(w http.ResponseWriter, r *http.Request) {
+				fileServer.ServeHTTP(w, r)
+			})
 			// SPA fallback: serve index.html for all UI routes
 			spaHandler := func(w http.ResponseWriter, r *http.Request) {
 				f, err := distFS.Open("index.html")

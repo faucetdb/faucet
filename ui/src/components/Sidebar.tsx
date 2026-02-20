@@ -103,11 +103,7 @@ export function Sidebar({ currentPath, isOpen, onClose }: SidebarProps) {
     >
       {/* Logo */}
       <div class="flex items-center gap-3 px-5 h-16 border-b border-border-subtle shrink-0">
-        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-brand to-cyan-accent flex items-center justify-center">
-          <svg class="w-4 h-4 text-white" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM14 11a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1h-1a1 1 0 110-2h1v-1a1 1 0 011-1z" />
-          </svg>
-        </div>
+        <img src="/faucet-icon.svg" alt="Faucet" width="28" height="28" class="shrink-0" />
         <div>
           <span class="text-base font-semibold text-text-primary tracking-tight">Faucet</span>
           <span class="text-xs text-text-muted ml-2">Admin</span>
