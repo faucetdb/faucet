@@ -52,5 +52,6 @@ tmp/
 *.tmp
 *.log
 
-# Docs site (separate repo)
+# Docs (separate repo: faucetdb/wiki)
+docs/
 docs-site/
