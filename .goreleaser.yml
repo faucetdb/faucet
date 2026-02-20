@@ -4,7 +4,6 @@ project_name: faucet
 before:
   hooks:
     - go mod tidy
-    - cd ui && npm ci && npm run build
 
 builds:
   - id: faucet
@@ -57,41 +56,3 @@ brews:
       bin.install "faucet"
     test: |
       system "#{bin}/faucet", "version"
-
-dockers:
-  - image_templates:
-      - "faucetdb/faucet:{{ .Version }}-amd64"
-    dockerfile: Dockerfile.goreleaser
-    use: buildx
-    build_flag_templates:
-      - "--pull"
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-    goarch: amd64
-
-  - image_templates:
-      - "faucetdb/faucet:{{ .Version }}-arm64"
-    dockerfile: Dockerfile.goreleaser
-    use: buildx
-    build_flag_templates:
-      - "--pull"
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-    goarch: arm64
-
-docker_manifests:
-  - name_template: "faucetdb/faucet:{{ .Version }}"
-    image_templates:
-      - "faucetdb/faucet:{{ .Version }}-amd64"
-      - "faucetdb/faucet:{{ .Version }}-arm64"
-
-  - name_template: "faucetdb/faucet:latest"
-    image_templates:
-      - "faucetdb/faucet:{{ .Version }}-amd64"
-      - "faucetdb/faucet:{{ .Version }}-arm64"
