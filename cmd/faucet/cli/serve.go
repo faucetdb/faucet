@@ -11,10 +11,6 @@ import (
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
-	"github.com/faucetdb/faucet/internal/connector/mssql"
-	"github.com/faucetdb/faucet/internal/connector/mysql"
-	"github.com/faucetdb/faucet/internal/connector/postgres"
-	"github.com/faucetdb/faucet/internal/connector/snowflake"
 	"github.com/faucetdb/faucet/internal/server"
 	"github.com/faucetdb/faucet/internal/service"
 )
@@ -66,10 +62,7 @@ func runServe(host string, port int, noUI, dev bool, dataDir string) error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
 
 	// 1. Initialize config store (SQLite)
-	if dataDir == "" {
-		home, _ := os.UserHomeDir()
-		dataDir = home + "/.faucet"
-	}
+	dataDir = resolveDataDir()
 	store, err := config.NewStore(dataDir)
 	if err != nil {
 		return fmt.Errorf("init config store: %w", err)
@@ -78,12 +71,8 @@ func runServe(host string, port int, noUI, dev bool, dataDir string) error {
 	logger.Info("config store initialized", "path", dataDir)
 
 	// 2. Initialize connector registry and register drivers
-	registry := connector.NewRegistry()
-	registry.RegisterDriver("postgres", func() connector.Connector { return postgres.New() })
-	registry.RegisterDriver("mysql", func() connector.Connector { return mysql.New() })
-	registry.RegisterDriver("mssql", func() connector.Connector { return mssql.New() })
-	registry.RegisterDriver("snowflake", func() connector.Connector { return snowflake.New() })
-	logger.Info("connector registry initialized", "drivers", []string{"postgres", "mysql", "mssql", "snowflake"})
+	registry := newRegistry()
+	logger.Info("connector registry initialized", "drivers", []string{"postgres", "mysql", "mssql", "snowflake", "sqlite"})
 
 	// 3. Load services from config and connect them
 	services, err := store.ListServices(cmd_ctx())

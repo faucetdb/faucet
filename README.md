@@ -17,16 +17,22 @@ go install github.com/faucetdb/faucet/cmd/faucet@latest
 # Start the server
 faucet serve
 
+# Create an admin account
+faucet admin create --email admin@example.com --password changeme123
+
 # Add a database
 faucet db add mydb --driver postgres --dsn "postgres://user:pass@localhost/mydb?sslmode=disable"
 
-# Query your data
-curl -H "X-API-Key: YOUR_KEY" http://localhost:8080/api/v1/mydb/_table/users?limit=10
+# Create an API key
+faucet key create --role default
+
+# Query your data (use the key printed above)
+curl -H "X-API-Key: faucet_YOUR_KEY_HERE" http://localhost:8080/api/v1/mydb/_table/users?limit=10
 ```
 
 ## Features
 
-- **4 Database Connectors** - PostgreSQL, MySQL, SQL Server, Snowflake
+- **5 Database Connectors** - PostgreSQL, MySQL, SQL Server, Snowflake, SQLite
 - **Full CRUD REST API** - GET, POST, PUT, PATCH, DELETE with filtering, ordering, pagination
 - **DreamFactory-Compatible Filters** - `(age > 21) AND (status = 'active')`
 - **Schema Introspection & DDL** - Discover tables, create/alter/drop via API
@@ -87,7 +93,7 @@ POST   /api/v1/{service}/_proc/{proc}            # Call procedure
 | `offset`  | `50` | Skip N records |
 | `fields`  | `id,name,email` | Select specific columns |
 | `ids`     | `1,2,3` | Filter by primary key |
-| `count`   | `true` | Include total count in meta |
+| `include_count` | `true` | Include total count in meta |
 
 ## MCP Server (for AI Agents)
 

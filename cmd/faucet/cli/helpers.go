@@ -15,15 +15,23 @@ import (
 // dataDir holds the --data-dir persistent flag value (set on root command).
 var dataDir string
 
+// resolveDataDir returns the data directory from --data-dir flag,
+// FAUCET_DATA_DIR env var, or ~/.faucet as fallback.
+func resolveDataDir() string {
+	if dataDir != "" {
+		return dataDir
+	}
+	if envDir := os.Getenv("FAUCET_DATA_DIR"); envDir != "" {
+		return envDir
+	}
+	home, _ := os.UserHomeDir()
+	return home + "/.faucet"
+}
+
 // openConfigStore opens the SQLite config store, defaulting to ~/.faucet
 // if no data dir was specified.
 func openConfigStore() (*config.Store, error) {
-	dir := dataDir
-	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = home + "/.faucet"
-	}
-	return config.NewStore(dir)
+	return config.NewStore(resolveDataDir())
 }
 
 // newRegistry creates a connector registry with all supported database drivers registered.

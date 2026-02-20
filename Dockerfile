@@ -23,8 +23,16 @@ FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
 COPY --from=go-builder /faucet /usr/local/bin/faucet
 
+RUN addgroup -S faucet && adduser -S faucet -G faucet
+RUN mkdir -p /data && chown faucet:faucet /data
+
+ENV FAUCET_DATA_DIR=/data
 EXPOSE 8080
 VOLUME /data
 
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD wget --spider -q http://localhost:8080/healthz || exit 1
+
+USER faucet
 ENTRYPOINT ["faucet"]
 CMD ["serve", "--host", "0.0.0.0"]

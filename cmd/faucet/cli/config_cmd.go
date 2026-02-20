@@ -66,7 +66,7 @@ config_db: faucet.db
 # Authentication
 auth:
   jwt_secret: ""  # Set via FAUCET_AUTH_JWT_SECRET env var
-  api_key_header: X-Faucet-Api-Key
+  api_key_header: X-API-Key
 
 # Rate limiting
 rate_limit:

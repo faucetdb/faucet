@@ -11,10 +11,6 @@ import (
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
-	"github.com/faucetdb/faucet/internal/connector/mssql"
-	"github.com/faucetdb/faucet/internal/connector/mysql"
-	"github.com/faucetdb/faucet/internal/connector/postgres"
-	"github.com/faucetdb/faucet/internal/connector/snowflake"
 	fmcp "github.com/faucetdb/faucet/internal/mcp"
 )
 
@@ -22,7 +18,6 @@ func newMCPCmd() *cobra.Command {
 	var (
 		transport string
 		port      int
-		dataDir   string
 	)
 
 	cmd := &cobra.Command{
@@ -38,37 +33,28 @@ In HTTP mode, the server listens on the specified port for SSE connections.`,
 		Example: `  faucet mcp                            # stdio mode (for Claude Desktop)
   faucet mcp --transport http --port 3001  # HTTP SSE mode`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCP(transport, port, dataDir)
+			return runMCP(transport, port)
 		},
 	}
 
 	cmd.Flags().StringVar(&transport, "transport", "stdio", "Transport mode: stdio or http")
 	cmd.Flags().IntVar(&port, "port", 3001, "HTTP port (only used with --transport http)")
-	cmd.Flags().StringVar(&dataDir, "data-dir", "", "Data directory for SQLite config (default: ~/.faucet)")
 
 	return cmd
 }
 
-func runMCP(transport string, port int, dataDir string) error {
+func runMCP(transport string, port int) error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	// Initialize config store
-	if dataDir == "" {
-		home, _ := os.UserHomeDir()
-		dataDir = home + "/.faucet"
-	}
-	store, err := config.NewStore(dataDir)
+	store, err := config.NewStore(resolveDataDir())
 	if err != nil {
 		return fmt.Errorf("init config store: %w", err)
 	}
 	defer store.Close()
 
 	// Initialize connector registry
-	registry := connector.NewRegistry()
-	registry.RegisterDriver("postgres", func() connector.Connector { return postgres.New() })
-	registry.RegisterDriver("mysql", func() connector.Connector { return mysql.New() })
-	registry.RegisterDriver("mssql", func() connector.Connector { return mssql.New() })
-	registry.RegisterDriver("snowflake", func() connector.Connector { return snowflake.New() })
+	registry := newRegistry()
 
 	// Connect all active services
 	services, err := store.ListServices(context.Background())

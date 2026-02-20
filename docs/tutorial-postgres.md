@@ -110,7 +110,7 @@ curl "http://localhost:8080/api/v1/mydb/_table/orders?limit=10&offset=0&order=cr
 ### Count records
 
 ```bash
-curl "http://localhost:8080/api/v1/mydb/_table/orders?count=true" \
+curl "http://localhost:8080/api/v1/mydb/_table/orders?include_count=true" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -138,16 +138,16 @@ PostgreSQL supports RETURNING, so the response includes server-generated values:
 ### Update a record
 
 ```bash
-curl -X PATCH "http://localhost:8080/api/v1/mydb/_table/customers/42" \
+curl -X PATCH "http://localhost:8080/api/v1/mydb/_table/customers?ids=42" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"resource": [{"name": "Acme Corporation"}]}'
+  -d '{"name": "Acme Corporation"}'
 ```
 
 ### Delete a record
 
 ```bash
-curl -X DELETE "http://localhost:8080/api/v1/mydb/_table/customers/42" \
+curl -X DELETE "http://localhost:8080/api/v1/mydb/_table/customers?ids=42" \
   -H "Authorization: Bearer $TOKEN"
 ```
 

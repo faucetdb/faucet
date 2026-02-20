@@ -110,7 +110,7 @@ curl "http://localhost:8080/api/v1/mydb/_table/Orders?limit=10&offset=0&order=Cr
 ### Count records
 
 ```bash
-curl "http://localhost:8080/api/v1/mydb/_table/Orders?count=true" \
+curl "http://localhost:8080/api/v1/mydb/_table/Orders?include_count=true" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -138,16 +138,16 @@ SQL Server supports RETURNING via OUTPUT clause, so the response includes server
 ### Update a record
 
 ```bash
-curl -X PATCH "http://localhost:8080/api/v1/mydb/_table/Customers/42" \
+curl -X PATCH "http://localhost:8080/api/v1/mydb/_table/Customers?ids=42" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"resource": [{"Name": "Acme Corporation"}]}'
+  -d '{"Name": "Acme Corporation"}'
 ```
 
 ### Delete a record
 
 ```bash
-curl -X DELETE "http://localhost:8080/api/v1/mydb/_table/Customers/42" \
+curl -X DELETE "http://localhost:8080/api/v1/mydb/_table/Customers?ids=42" \
   -H "Authorization: Bearer $TOKEN"
 ```
 

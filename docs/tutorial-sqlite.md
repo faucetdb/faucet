@@ -174,7 +174,7 @@ curl "http://localhost:8080/api/v1/mydata/_table/posts?limit=10&offset=0&order=c
 ### Count records
 
 ```bash
-curl "http://localhost:8080/api/v1/mydata/_table/posts?count=true" \
+curl "http://localhost:8080/api/v1/mydata/_table/posts?include_count=true" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -202,16 +202,16 @@ SQLite supports RETURNING, so the response includes the server-generated ID:
 ### Update a record
 
 ```bash
-curl -X PATCH "http://localhost:8080/api/v1/mydata/_table/users/4" \
+curl -X PATCH "http://localhost:8080/api/v1/mydata/_table/users?ids=4" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"resource": [{"name": "Diana Prince"}]}'
+  -d '{"name": "Diana Prince"}'
 ```
 
 ### Delete a record
 
 ```bash
-curl -X DELETE "http://localhost:8080/api/v1/mydata/_table/users/4" \
+curl -X DELETE "http://localhost:8080/api/v1/mydata/_table/users?ids=4" \
   -H "Authorization: Bearer $TOKEN"
 ```
 

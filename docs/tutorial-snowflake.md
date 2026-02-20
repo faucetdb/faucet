@@ -121,7 +121,7 @@ curl "http://localhost:8080/api/v1/analytics/_table/CUSTOMERS?fields=CUSTOMER_ID
 ### Get record count
 
 ```bash
-curl "http://localhost:8080/api/v1/analytics/_table/ORDERS?count=true" \
+curl "http://localhost:8080/api/v1/analytics/_table/ORDERS?include_count=true" \
   -H "Authorization: Bearer $TOKEN"
 ```
 

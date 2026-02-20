@@ -110,7 +110,7 @@ curl "http://localhost:8080/api/v1/mydb/_table/orders?limit=10&offset=0&order=cr
 ### Count records
 
 ```bash
-curl "http://localhost:8080/api/v1/mydb/_table/orders?count=true" \
+curl "http://localhost:8080/api/v1/mydb/_table/orders?include_count=true" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -130,16 +130,16 @@ Note: MySQL does not support RETURNING, so the response echoes back the submitte
 ### Update a record
 
 ```bash
-curl -X PATCH "http://localhost:8080/api/v1/mydb/_table/customers/1" \
+curl -X PATCH "http://localhost:8080/api/v1/mydb/_table/customers?ids=1" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"resource": [{"name": "Acme Corporation"}]}'
+  -d '{"name": "Acme Corporation"}'
 ```
 
 ### Delete a record
 
 ```bash
-curl -X DELETE "http://localhost:8080/api/v1/mydb/_table/customers/1" \
+curl -X DELETE "http://localhost:8080/api/v1/mydb/_table/customers?ids=1" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
