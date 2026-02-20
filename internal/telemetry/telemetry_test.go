@@ -61,7 +61,28 @@ func TestResolveInstanceID_NilStore(t *testing.T) {
 	}
 }
 
+// setTestKey sets a fake PostHog API key for testing and restores it on cleanup.
+func setTestKey(t *testing.T) {
+	t.Helper()
+	old := posthogAPIKey
+	posthogAPIKey = "phx_test_key"
+	t.Cleanup(func() { posthogAPIKey = old })
+}
+
+func TestNew_DisabledWhenNoKey(t *testing.T) {
+	old := posthogAPIKey
+	posthogAPIKey = ""
+	defer func() { posthogAPIKey = old }()
+
+	store := newMockStore()
+	tracker := New(context.Background(), store, func() Properties { return Properties{} })
+	if tracker != nil {
+		t.Fatal("expected nil tracker when no API key is set")
+	}
+}
+
 func TestNew_DisabledViaSetting(t *testing.T) {
+	setTestKey(t)
 	store := newMockStore()
 	store.data["telemetry.enabled"] = "false"
 
@@ -72,6 +93,7 @@ func TestNew_DisabledViaSetting(t *testing.T) {
 }
 
 func TestNew_DisabledViaEnv(t *testing.T) {
+	setTestKey(t)
 	t.Setenv("FAUCET_TELEMETRY", "0")
 
 	store := newMockStore()
@@ -82,6 +104,7 @@ func TestNew_DisabledViaEnv(t *testing.T) {
 }
 
 func TestNew_EnabledByDefault(t *testing.T) {
+	setTestKey(t)
 	store := newMockStore()
 	tracker := New(context.Background(), store, func() Properties { return Properties{} })
 	if tracker == nil {
@@ -90,6 +113,7 @@ func TestNew_EnabledByDefault(t *testing.T) {
 }
 
 func TestTracker_InstanceIDPersisted(t *testing.T) {
+	setTestKey(t)
 	store := newMockStore()
 	tracker := New(context.Background(), store, func() Properties {
 		return Properties{
@@ -118,6 +142,7 @@ func TestTracker_InstanceIDPersisted(t *testing.T) {
 }
 
 func TestTracker_StartShutdown(t *testing.T) {
+	setTestKey(t)
 	store := newMockStore()
 	tracker := New(context.Background(), store, func() Properties {
 		return Properties{Version: "test"}

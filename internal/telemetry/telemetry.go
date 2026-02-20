@@ -15,10 +15,13 @@ import (
 
 const (
 	posthogEndpoint = "https://us.i.posthog.com/capture/"
-	posthogKey      = "phx_158V8vJdOGiidyidTnIXsd4O4NzqvJZ2AbhzyRoIgBjbOKd"
 	flushInterval   = 1 * time.Hour
 	httpTimeout     = 3 * time.Second
 )
+
+// posthogAPIKey is injected at build time via -ldflags.
+// When empty (e.g. dev builds from source), telemetry is silently disabled.
+var posthogAPIKey string
 
 // SettingsStore is the interface the telemetry package needs from the config store.
 type SettingsStore interface {
@@ -57,9 +60,15 @@ type Tracker struct {
 }
 
 // New creates a Tracker. It resolves (or generates) the instance ID from the
-// settings store. Returns nil if telemetry is disabled via env var or settings.
+// settings store. Returns nil if telemetry is disabled via env var, settings,
+// or if no API key was injected at build time (e.g. dev builds from source).
 func New(ctx context.Context, store SettingsStore, propsFn PropertiesFunc) *Tracker {
-	// Check environment variable override first
+	// No API key means this is a dev/source build — skip telemetry
+	if posthogAPIKey == "" {
+		return nil
+	}
+
+	// Check environment variable override
 	if envVal := os.Getenv("FAUCET_TELEMETRY"); envVal == "0" || envVal == "false" || envVal == "off" {
 		return nil
 	}
@@ -135,7 +144,7 @@ func (t *Tracker) flush() {
 
 func (t *Tracker) capture(event string, props Properties) {
 	payload := map[string]any{
-		"api_key":              posthogKey,
+		"api_key":              posthogAPIKey,
 		"event":                event,
 		"distinct_id":          t.instanceID,
 		"properties":           props,

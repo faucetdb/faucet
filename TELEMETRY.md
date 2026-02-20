@@ -58,6 +58,13 @@ The telemetry client has a 3-second timeout and fails silently. Blocking
 `us.i.posthog.com` at the firewall or DNS level will also prevent any data
 from being sent, with no impact on Faucet's operation.
 
+## Building from source
+
+If you build Faucet from source (`go build ./cmd/faucet`), telemetry is
+**automatically disabled** because the PostHog API key is only injected into
+official release binaries at build time via `-ldflags`. There is nothing to
+configure — source builds simply skip telemetry entirely.
+
 ## Implementation
 
 The telemetry implementation is fully open source at

@@ -23,6 +23,7 @@ builds:
       - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
+      - -X github.com/faucetdb/faucet/internal/telemetry.posthogAPIKey={{.Env.POSTHOG_API_KEY}}
 
 archives:
   - id: default
