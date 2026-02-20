@@ -74,6 +74,12 @@ func (s *Store) migrate() error {
 
 		// v2: Add private_key_path for Snowflake JWT / key-pair auth
 		`ALTER TABLE services ADD COLUMN private_key_path TEXT NOT NULL DEFAULT ''`,
+
+		// v3: Key-value settings table (telemetry, instance ID, etc.)
+		`CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL DEFAULT ''
+		)`,
 	}
 
 	for _, m := range migrations {

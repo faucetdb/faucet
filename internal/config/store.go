@@ -651,6 +651,70 @@ func (s *Store) UpdateAPIKeyLastUsed(ctx context.Context, id int64) error {
 // Utility
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Settings (key-value)
+// ---------------------------------------------------------------------------
+
+// GetSetting returns the value for a settings key, or ErrNotFound.
+func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
+	var value string
+	err := s.db.GetContext(ctx, &value, "SELECT value FROM settings WHERE key = ?", key)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("get setting %q: %w", key, err)
+	}
+	return value, nil
+}
+
+// SetSetting upserts a key-value pair in the settings table.
+func (s *Store) SetSetting(ctx context.Context, key, value string) error {
+	const q = `INSERT INTO settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+	if _, err := s.db.ExecContext(ctx, q, key, value); err != nil {
+		return fmt.Errorf("set setting %q: %w", key, err)
+	}
+	return nil
+}
+
+// DeleteSetting removes a setting by key.
+func (s *Store) DeleteSetting(ctx context.Context, key string) error {
+	result, err := s.db.ExecContext(ctx, "DELETE FROM settings WHERE key = ?", key)
+	if err != nil {
+		return fmt.Errorf("delete setting %q: %w", key, err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete setting rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListSettings returns all key-value pairs from the settings table.
+func (s *Store) ListSettings(ctx context.Context) (map[string]string, error) {
+	type row struct {
+		Key   string `db:"key"`
+		Value string `db:"value"`
+	}
+	var rows []row
+	if err := s.db.SelectContext(ctx, &rows, "SELECT key, value FROM settings ORDER BY key"); err != nil {
+		return nil, fmt.Errorf("list settings: %w", err)
+	}
+	m := make(map[string]string, len(rows))
+	for _, r := range rows {
+		m[r.Key] = r.Value
+	}
+	return m, nil
+}
+
+// ---------------------------------------------------------------------------
+// Utility
+// ---------------------------------------------------------------------------
+
 // HashAPIKey returns the hex-encoded SHA-256 hash of a raw API key string.
 func HashAPIKey(key string) string {
 	h := sha256.Sum256([]byte(key))

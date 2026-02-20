@@ -12,11 +12,13 @@ func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage Faucet configuration",
-		Long:  "Initialize a default configuration file or display the current effective configuration.",
+		Long:  "Initialize a default configuration file or manage persistent settings.",
 	}
 
 	cmd.AddCommand(newConfigInitCmd())
 	cmd.AddCommand(newConfigShowCmd())
+	cmd.AddCommand(newConfigSetCmd())
+	cmd.AddCommand(newConfigGetCmd())
 
 	return cmd
 }
@@ -83,6 +85,13 @@ log:
 mcp:
   enabled: false
   transport: stdio
+
+# Telemetry (anonymous usage stats)
+# Disable with: faucet config set telemetry.enabled false
+# Or set FAUCET_TELEMETRY=0 environment variable
+# See: https://github.com/faucetdb/faucet/blob/main/TELEMETRY.md
+telemetry:
+  enabled: true
 `
 
 func runConfigInit(force bool) error {
@@ -142,4 +151,61 @@ func runConfigShow() error {
 	}
 
 	return nil
+}
+
+// ---------- config set ----------
+
+func newConfigSetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "Set a persistent configuration value",
+		Long: `Set a key-value pair in the persistent settings store.
+
+Examples:
+  faucet config set telemetry.enabled false
+  faucet config set instance_id my-custom-id`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := openConfigStore()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			if err := store.SetSetting(cmd.Context(), args[0], args[1]); err != nil {
+				return fmt.Errorf("set %q: %w", args[0], err)
+			}
+			fmt.Printf("Set %s = %s\n", args[0], args[1])
+			return nil
+		},
+	}
+}
+
+// ---------- config get ----------
+
+func newConfigGetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "get <key>",
+		Short: "Get a persistent configuration value",
+		Long: `Get a value from the persistent settings store.
+
+Examples:
+  faucet config get telemetry.enabled
+  faucet config get instance_id`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := openConfigStore()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			val, err := store.GetSetting(cmd.Context(), args[0])
+			if err != nil {
+				return fmt.Errorf("get %q: %w", args[0], err)
+			}
+			fmt.Println(val)
+			return nil
+		},
+	}
 }

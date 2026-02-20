@@ -447,6 +447,71 @@ func TestHashAPIKey(t *testing.T) {
 	}
 }
 
+func TestSettingsCRUD(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Get nonexistent key returns ErrNotFound
+	_, err := s.GetSetting(ctx, "nonexistent")
+	if err != ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+
+	// Set and get
+	if err := s.SetSetting(ctx, "telemetry.enabled", "true"); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	val, err := s.GetSetting(ctx, "telemetry.enabled")
+	if err != nil {
+		t.Fatalf("GetSetting: %v", err)
+	}
+	if val != "true" {
+		t.Errorf("got %q, want %q", val, "true")
+	}
+
+	// Upsert (overwrite)
+	if err := s.SetSetting(ctx, "telemetry.enabled", "false"); err != nil {
+		t.Fatalf("SetSetting upsert: %v", err)
+	}
+	val, err = s.GetSetting(ctx, "telemetry.enabled")
+	if err != nil {
+		t.Fatalf("GetSetting after upsert: %v", err)
+	}
+	if val != "false" {
+		t.Errorf("got %q, want %q", val, "false")
+	}
+
+	// ListSettings
+	if err := s.SetSetting(ctx, "instance_id", "abc-123"); err != nil {
+		t.Fatalf("SetSetting instance_id: %v", err)
+	}
+	settings, err := s.ListSettings(ctx)
+	if err != nil {
+		t.Fatalf("ListSettings: %v", err)
+	}
+	if len(settings) != 2 {
+		t.Errorf("expected 2 settings, got %d", len(settings))
+	}
+	if settings["instance_id"] != "abc-123" {
+		t.Errorf("instance_id: got %q, want %q", settings["instance_id"], "abc-123")
+	}
+
+	// Delete
+	if err := s.DeleteSetting(ctx, "instance_id"); err != nil {
+		t.Fatalf("DeleteSetting: %v", err)
+	}
+	_, err = s.GetSetting(ctx, "instance_id")
+	if err != ErrNotFound {
+		t.Errorf("expected ErrNotFound after delete, got %v", err)
+	}
+
+	// Delete nonexistent
+	err = s.DeleteSetting(ctx, "nope")
+	if err != ErrNotFound {
+		t.Errorf("expected ErrNotFound on delete nonexistent, got %v", err)
+	}
+}
+
 func TestPoolConfigRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

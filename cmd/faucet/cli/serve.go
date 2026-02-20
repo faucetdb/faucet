@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -13,6 +14,7 @@ import (
 	"github.com/faucetdb/faucet/internal/connector"
 	"github.com/faucetdb/faucet/internal/server"
 	"github.com/faucetdb/faucet/internal/service"
+	"github.com/faucetdb/faucet/internal/telemetry"
 )
 
 const banner = `
@@ -116,7 +118,68 @@ func runServe(host string, port int, noUI, dev bool) error {
 		logger.Warn("no admin account found - visit /setup or run: faucet admin create")
 	}
 
-	// 6. Build and start HTTP server
+	// 6. Initialize telemetry
+	tracker := telemetry.New(cmd_ctx(), store, func() telemetry.Properties {
+		// Gather current state for each heartbeat
+		svcs, _ := store.ListServices(cmd_ctx())
+		admins, _ := store.ListAdmins(cmd_ctx())
+		keys, _ := store.ListAPIKeys(cmd_ctx())
+		roles, _ := store.ListRoles(cmd_ctx())
+
+		dbTypes := make([]string, 0)
+		tableCount := 0
+		seen := make(map[string]bool)
+		for _, svc := range svcs {
+			if !svc.IsActive {
+				continue
+			}
+			if !seen[svc.Driver] {
+				dbTypes = append(dbTypes, svc.Driver)
+				seen[svc.Driver] = true
+			}
+			// Count tables from connected services
+			if conn, err := registry.Get(svc.Name); err == nil {
+				if names, err := conn.GetTableNames(cmd_ctx()); err == nil {
+					tableCount += len(names)
+				}
+			}
+		}
+
+		features := make([]string, 0)
+		if !noUI {
+			features = append(features, "ui")
+		}
+		if len(roles) > 0 {
+			features = append(features, "rbac")
+		}
+		if len(keys) > 0 {
+			features = append(features, "api_keys")
+		}
+
+		return telemetry.Properties{
+			Version:   appVersion,
+			GoVersion: runtime.Version(),
+			OS:        runtime.GOOS,
+			Arch:      runtime.GOARCH,
+			DBTypes:   dbTypes,
+			Services:  len(registry.ListServices()),
+			Tables:    tableCount,
+			Admins:    len(admins),
+			APIKeys:   len(keys),
+			Roles:     len(roles),
+			Features:  features,
+		}
+	})
+	if tracker != nil {
+		telemetry.PrintNotice()
+		tracker.Start()
+		defer tracker.Shutdown()
+		logger.Info("telemetry enabled", "docs", "https://github.com/faucetdb/faucet/blob/main/TELEMETRY.md")
+	} else {
+		logger.Info("telemetry disabled")
+	}
+
+	// 7. Build and start HTTP server
 	srvCfg := server.Config{
 		Host:            host,
 		Port:            port,

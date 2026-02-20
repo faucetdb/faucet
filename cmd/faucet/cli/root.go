@@ -5,10 +5,14 @@ import (
 	"github.com/spf13/viper"
 )
 
-var cfgFile string
+var (
+	cfgFile    string
+	appVersion string // set in Execute, used by serve for telemetry
+)
 
 // Execute creates the root command tree and runs it.
 func Execute(version, commit, date string) error {
+	appVersion = version
 	rootCmd := newRootCmd(version, commit, date)
 	return rootCmd.Execute()
 }
