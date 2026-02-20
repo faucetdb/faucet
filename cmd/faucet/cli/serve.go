@@ -35,7 +35,7 @@ func newServeCmd() *cobra.Command {
 		Short: "Start the Faucet API server",
 		Long:  "Start the HTTP server that exposes REST APIs for all configured database services.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runServe(host, port, noUI, dev, dataDir)
+			return runServe(host, port, noUI, dev)
 		},
 	}
 
@@ -50,7 +50,7 @@ func newServeCmd() *cobra.Command {
 	return cmd
 }
 
-func runServe(host string, port int, noUI, dev bool, dataDir string) error {
+func runServe(host string, port int, noUI, dev bool) error {
 	fmt.Print(banner)
 	fmt.Println()
 
@@ -62,13 +62,13 @@ func runServe(host string, port int, noUI, dev bool, dataDir string) error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
 
 	// 1. Initialize config store (SQLite)
-	dataDir = resolveDataDir()
-	store, err := config.NewStore(dataDir)
+	dir := resolveDataDir()
+	store, err := config.NewStore(dir)
 	if err != nil {
 		return fmt.Errorf("init config store: %w", err)
 	}
 	defer store.Close()
-	logger.Info("config store initialized", "path", dataDir)
+	logger.Info("config store initialized", "path", dir)
 
 	// 2. Initialize connector registry and register drivers
 	registry := newRegistry()
