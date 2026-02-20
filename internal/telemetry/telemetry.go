@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -68,8 +69,8 @@ func New(ctx context.Context, store SettingsStore, propsFn PropertiesFunc) *Trac
 		return nil
 	}
 
-	// Check environment variable override
-	if envVal := os.Getenv("FAUCET_TELEMETRY"); envVal == "0" || envVal == "false" || envVal == "off" {
+	// Check environment variable override (case-insensitive)
+	if envVal := strings.ToLower(os.Getenv("FAUCET_TELEMETRY")); envVal == "0" || envVal == "false" || envVal == "off" || envVal == "no" {
 		return nil
 	}
 

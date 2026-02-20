@@ -65,7 +65,7 @@ func TestResolveInstanceID_NilStore(t *testing.T) {
 func setTestKey(t *testing.T) {
 	t.Helper()
 	old := posthogAPIKey
-	posthogAPIKey = "phx_test_key"
+	posthogAPIKey = "phc_test_key"
 	t.Cleanup(func() { posthogAPIKey = old })
 }
 
@@ -100,6 +100,21 @@ func TestNew_DisabledViaEnv(t *testing.T) {
 	tracker := New(context.Background(), store, func() Properties { return Properties{} })
 	if tracker != nil {
 		t.Fatal("expected nil tracker when FAUCET_TELEMETRY=0")
+	}
+}
+
+func TestNew_DisabledViaEnvCaseInsensitive(t *testing.T) {
+	setTestKey(t)
+
+	for _, val := range []string{"False", "FALSE", "Off", "NO", "no"} {
+		t.Run(val, func(t *testing.T) {
+			t.Setenv("FAUCET_TELEMETRY", val)
+			store := newMockStore()
+			tracker := New(context.Background(), store, func() Properties { return Properties{} })
+			if tracker != nil {
+				t.Fatalf("expected nil tracker when FAUCET_TELEMETRY=%s", val)
+			}
+		})
 	}
 }
 
