@@ -2,6 +2,9 @@ package cli
 
 import (
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
@@ -43,4 +46,45 @@ func newRegistry() *connector.Registry {
 	registry.RegisterDriver("snowflake", func() connector.Connector { return snowflake.New() })
 	registry.RegisterDriver("sqlite", func() connector.Connector { return sqlite.New() })
 	return registry
+}
+
+// --- PID file management ---
+
+func pidFilePath() string {
+	return filepath.Join(resolveDataDir(), "faucet.pid")
+}
+
+func writePID(pid int) error {
+	dir := resolveDataDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(pidFilePath(), []byte(strconv.Itoa(pid)), 0644)
+}
+
+func readPID() (int, error) {
+	data, err := os.ReadFile(pidFilePath())
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(string(data)))
+}
+
+func removePID() {
+	os.Remove(pidFilePath())
+}
+
+func logFilePath() string {
+	return filepath.Join(resolveDataDir(), "faucet.log")
+}
+
+// versionString returns a display version string.
+func versionString() string {
+	if appVersion == "" || appVersion == "dev" {
+		return "dev"
+	}
+	if strings.HasPrefix(appVersion, "v") {
+		return appVersion
+	}
+	return "v" + appVersion
 }

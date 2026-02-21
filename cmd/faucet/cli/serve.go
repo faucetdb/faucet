@@ -4,8 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -26,18 +31,30 @@ const banner = `
 
 func newServeCmd() *cobra.Command {
 	var (
-		port int
-		host string
-		noUI bool
-		dev  bool
+		port       int
+		host       string
+		noUI       bool
+		dev        bool
+		foreground bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the Faucet API server",
-		Long:  "Start the HTTP server that exposes REST APIs for all configured database services.",
+		Long: `Start the HTTP server that exposes REST APIs for all configured database services.
+
+By default, the server starts in the background and returns control to your
+terminal so you can immediately run other faucet commands (db add, key create,
+etc.). Use --foreground for Docker, systemd, or other process managers.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runServe(host, port, noUI, dev)
+			// Dev mode implies foreground for live log viewing
+			if dev {
+				foreground = true
+			}
+			if foreground {
+				return runServe(host, port, noUI, dev)
+			}
+			return runServeDaemon(host, port, noUI, dev)
 		},
 	}
 
@@ -45,6 +62,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "0.0.0.0", "HTTP listen host")
 	cmd.Flags().BoolVar(&noUI, "no-ui", false, "Disable the admin UI")
 	cmd.Flags().BoolVar(&dev, "dev", false, "Enable development mode (verbose logging, CORS *)")
+	cmd.Flags().BoolVar(&foreground, "foreground", false, "Run in foreground (for Docker, systemd, etc.)")
 
 	viper.BindPFlag("server.port", cmd.Flags().Lookup("port"))
 	viper.BindPFlag("server.host", cmd.Flags().Lookup("host"))
@@ -52,6 +70,106 @@ func newServeCmd() *cobra.Command {
 	return cmd
 }
 
+// runServeDaemon starts the server as a background process and returns control to the terminal.
+func runServeDaemon(host string, port int, noUI, dev bool) error {
+	// Check if server is already running
+	if pid, err := readPID(); err == nil {
+		if isProcessRunning(pid) {
+			return fmt.Errorf("server already running (PID %d) — use 'faucet stop' first", pid)
+		}
+		removePID()
+	}
+
+	fmt.Print(banner)
+	fmt.Println()
+
+	// Find our executable
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("find executable: %w", err)
+	}
+
+	// Build args for child process in foreground mode
+	args := []string{"serve", "--foreground"}
+	args = append(args, "--host", host)
+	args = append(args, "-p", strconv.Itoa(port))
+	if noUI {
+		args = append(args, "--no-ui")
+	}
+	if dataDir != "" {
+		args = append(args, "--data-dir", dataDir)
+	}
+	if cfgFile != "" {
+		args = append(args, "--config", cfgFile)
+	}
+
+	// Ensure data directory exists and open log file
+	dir := resolveDataDir()
+	os.MkdirAll(dir, 0755)
+	logPath := filepath.Join(dir, "faucet.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+
+	// Start detached child process
+	child := exec.Command(exe, args...)
+	child.Stdout = logFile
+	child.Stderr = logFile
+	child.Stdin = nil
+	setSysProcAttr(child)
+
+	if err := child.Start(); err != nil {
+		logFile.Close()
+		return fmt.Errorf("start server process: %w", err)
+	}
+	logFile.Close()
+
+	pid := child.Process.Pid
+
+	// Wait for server to become healthy
+	healthAddr := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
+	if host != "0.0.0.0" && host != "" {
+		healthAddr = fmt.Sprintf("http://%s:%d/healthz", host, port)
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	healthy := false
+	for i := 0; i < 50; i++ { // up to 5 seconds
+		time.Sleep(100 * time.Millisecond)
+		resp, err := client.Get(healthAddr)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				healthy = true
+				break
+			}
+		}
+	}
+
+	if !healthy {
+		fmt.Fprintf(os.Stderr, "warning: server may not have started correctly (PID %d)\n", pid)
+		fmt.Fprintf(os.Stderr, "  check logs: %s\n\n", logPath)
+	}
+
+	fmt.Printf("  Faucet %s\n", versionString())
+	fmt.Printf("  Listening on http://%s:%d\n", host, port)
+	if !noUI {
+		fmt.Printf("  Admin UI:   http://%s:%d/admin\n", host, port)
+	}
+	fmt.Printf("  OpenAPI:    http://%s:%d/openapi.json\n", host, port)
+	fmt.Printf("  Health:     http://%s:%d/healthz\n", host, port)
+	fmt.Println()
+	fmt.Printf("  Server running in background (PID %d)\n", pid)
+	fmt.Printf("  Logs: %s\n", logPath)
+	fmt.Println()
+	fmt.Println("Use 'faucet stop' to stop the server.")
+	fmt.Println("Use 'faucet status' to check server health.")
+
+	return nil
+}
+
+// runServe starts the server in the foreground (blocking mode).
 func runServe(host string, port int, noUI, dev bool) error {
 	fmt.Print(banner)
 	fmt.Println()
@@ -179,6 +297,12 @@ func runServe(host string, port int, noUI, dev bool) error {
 		logger.Info("telemetry disabled")
 	}
 
+	// Write PID file so stop/status commands can find this process
+	if err := writePID(os.Getpid()); err != nil {
+		logger.Warn("failed to write PID file", "error", err)
+	}
+	defer removePID()
+
 	// 7. Build and start HTTP server
 	srvCfg := server.Config{
 		Host:            host,
@@ -191,7 +315,7 @@ func runServe(host string, port int, noUI, dev bool) error {
 
 	srv := server.New(srvCfg, registry, store, authSvc, logger)
 
-	fmt.Printf("→ Faucet v0.1.0\n")
+	fmt.Printf("→ Faucet %s\n", versionString())
 	fmt.Printf("→ Listening on http://%s:%d\n", host, port)
 	if !noUI {
 		fmt.Printf("→ Admin UI:   http://%s:%d/admin\n", host, port)

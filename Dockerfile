@@ -35,4 +35,4 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
 
 USER faucet
 ENTRYPOINT ["faucet"]
-CMD ["serve", "--host", "0.0.0.0"]
+CMD ["serve", "--foreground", "--host", "0.0.0.0"]

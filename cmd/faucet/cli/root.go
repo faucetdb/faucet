@@ -37,6 +37,8 @@ and a built-in MCP server for AI agents.`,
 
 	// Add subcommands
 	cmd.AddCommand(newServeCmd())
+	cmd.AddCommand(newStopCmd())
+	cmd.AddCommand(newStatusCmd())
 	cmd.AddCommand(newVersionCmd(version, commit, date))
 	cmd.AddCommand(newDBCmd())
 	cmd.AddCommand(newKeyCmd())
