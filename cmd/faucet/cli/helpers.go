@@ -71,7 +71,7 @@ func readPID() (int, error) {
 }
 
 func removePID() {
-	os.Remove(pidFilePath())
+	_ = os.Remove(pidFilePath())
 }
 
 func logFilePath() string {

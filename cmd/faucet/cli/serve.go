@@ -105,7 +105,9 @@ func runServeDaemon(host string, port int, noUI, dev bool) error {
 
 	// Ensure data directory exists and open log file
 	dir := resolveDataDir()
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create data directory: %w", err)
+	}
 	logPath := filepath.Join(dir, "faucet.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
