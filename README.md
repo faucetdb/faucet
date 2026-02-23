@@ -32,6 +32,8 @@ Faucet is a **database-to-REST-API gateway** — a lightweight, self-hosted serv
 
 Think of it as an open-source alternative to [DreamFactory](https://www.dreamfactory.com/), [PostgREST](https://postgrest.org/), or [Hasura](https://hasura.io/) — but with multi-database support, a built-in admin UI, and native AI agent integration, all in a single ~22MB binary.
 
+![demo](https://github.com/faucetdb/faucet/blob/main/screenshots/faucet-demo.gif)
+
 ### Use Cases
 
 - **Instant backend for apps** — Skip writing CRUD APIs by hand. Point Faucet at your database and start building your frontend.
