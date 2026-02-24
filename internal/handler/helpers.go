@@ -118,6 +118,30 @@ func classifyDBError(err error, fallbackMsg string) (int, string) {
 	}
 }
 
+// BatchMode controls how batch operations handle errors.
+type BatchMode int
+
+const (
+	// BatchModeHalt stops at the first error (default). Prior operations are committed.
+	BatchModeHalt BatchMode = iota
+	// BatchModeRollback wraps all operations in a transaction and rolls back on any error.
+	BatchModeRollback
+	// BatchModeContinue processes all operations, collecting errors for mixed results.
+	BatchModeContinue
+)
+
+// parseBatchMode reads the rollback and continue query parameters to determine
+// the batch error handling mode. If both are set, rollback takes precedence.
+func parseBatchMode(r *http.Request) BatchMode {
+	if queryBool(r, "rollback") {
+		return BatchModeRollback
+	}
+	if queryBool(r, "continue") {
+		return BatchModeContinue
+	}
+	return BatchModeHalt
+}
+
 // clampInt constrains val to be within [min, max].
 func clampInt(val, min, max int) int {
 	if val < min {

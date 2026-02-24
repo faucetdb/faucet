@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -58,6 +59,11 @@ func (c *MySQLConnector) Connect(cfg connector.ConnectionConfig) error {
 
 	c.db = db
 	return nil
+}
+
+// BeginTx starts a new database transaction with the given options.
+func (c *MySQLConnector) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sqlx.Tx, error) {
+	return c.db.BeginTxx(ctx, opts)
 }
 
 // Disconnect closes the database connection pool.

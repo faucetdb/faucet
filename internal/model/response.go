@@ -17,6 +17,22 @@ type ResponseMeta struct {
 	TookMs     float64 `json:"took_ms"`
 }
 
+// BatchResponse is the envelope for batch operations that may have mixed results.
+// Used when ?continue=true produces partial successes.
+type BatchResponse struct {
+	Resource []interface{}      `json:"resource"`
+	Meta     *BatchResponseMeta `json:"meta,omitempty"`
+}
+
+// BatchResponseMeta extends ResponseMeta with batch operation tracking fields.
+type BatchResponseMeta struct {
+	Count     int     `json:"count"`
+	Succeeded int     `json:"succeeded"`
+	Failed    int     `json:"failed"`
+	Errors    []int   `json:"errors,omitempty"` // indices of failed operations
+	TookMs    float64 `json:"took_ms"`
+}
+
 // ErrorResponse is the standard envelope for error responses.
 type ErrorResponse struct {
 	Error ErrorDetail `json:"error"`

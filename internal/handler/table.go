@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
@@ -231,6 +233,11 @@ func (h *TableHandler) QueryRecords(w http.ResponseWriter, r *http.Request) {
 
 // CreateRecords inserts one or more records into a table.
 // POST /api/v1/{serviceName}/_table/{tableName}
+//
+// Batch modes (query parameters):
+//   - (default)         halt on first error; prior inserts are committed
+//   - ?rollback=true    wrap in transaction; all-or-nothing
+//   - ?continue=true    insert each record independently; report mixed results
 func (h *TableHandler) CreateRecords(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
@@ -243,7 +250,6 @@ func (h *TableHandler) CreateRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse request body: accept either a single object or {"resource": [...]}
 	records, err := parseRecordsBody(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
@@ -254,45 +260,166 @@ func (h *TableHandler) CreateRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mode := parseBatchMode(r)
+
+	// Continue mode: insert each record individually, collecting per-record results.
+	if mode == BatchModeContinue {
+		h.createRecordsContinue(w, r, conn, tableName, records, start)
+		return
+	}
+
+	// Build a single multi-row INSERT for halt and rollback modes.
 	insertReq := connector.InsertRequest{
 		Table:   tableName,
 		Records: records,
 	}
-
 	sqlStr, args, err := conn.BuildInsert(r.Context(), insertReq)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to build insert: "+err.Error())
 		return
 	}
 
-	db := conn.DB()
+	// Choose executor: transaction for rollback mode, raw DB otherwise.
+	var exec connector.QueryExecutor
+	exec = conn.DB()
+	if mode == BatchModeRollback {
+		tx, err := conn.BeginTx(r.Context(), nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to begin transaction: "+err.Error())
+			return
+		}
+		defer tx.Rollback()
+		exec = tx
 
-	if conn.SupportsReturning() {
-		// Execute with RETURNING to get the created records back.
-		rows, err := db.QueryxContext(r.Context(), sqlStr, args...)
+		// Execute + commit in rollback mode.
+		created, err := execInsert(r.Context(), exec, conn, sqlStr, args)
 		if err != nil {
 			code, msg := classifyDBError(err, "Insert failed")
 			writeError(w, code, msg)
 			return
 		}
-		defer rows.Close()
+		if err := tx.Commit(); err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to commit transaction: "+err.Error())
+			return
+		}
+		took := time.Since(start)
+		writeCreateResponse(w, conn, created, records, took)
+		return
+	}
 
-		created := make([]map[string]interface{}, 0)
+	// Halt mode (default): execute directly.
+	created, err := execInsert(r.Context(), exec, conn, sqlStr, args)
+	if err != nil {
+		code, msg := classifyDBError(err, "Insert failed")
+		writeError(w, code, msg)
+		return
+	}
+	took := time.Since(start)
+	writeCreateResponse(w, conn, created, records, took)
+}
+
+// createRecordsContinue inserts each record individually, collecting successes and errors.
+func (h *TableHandler) createRecordsContinue(w http.ResponseWriter, r *http.Request, conn connector.Connector, tableName string, records []map[string]interface{}, start time.Time) {
+	db := conn.DB()
+	results := make([]interface{}, len(records))
+	var errIndices []int
+	succeeded := 0
+
+	for i, rec := range records {
+		singleReq := connector.InsertRequest{
+			Table:   tableName,
+			Records: []map[string]interface{}{rec},
+		}
+		sqlStr, args, err := conn.BuildInsert(r.Context(), singleReq)
+		if err != nil {
+			results[i] = map[string]interface{}{"error": model.ErrorDetail{Code: 500, Message: "Failed to build insert: " + err.Error()}}
+			errIndices = append(errIndices, i)
+			continue
+		}
+
+		if conn.SupportsReturning() {
+			rows, err := db.QueryxContext(r.Context(), sqlStr, args...)
+			if err != nil {
+				code, msg := classifyDBError(err, "Insert failed")
+				results[i] = map[string]interface{}{"error": model.ErrorDetail{Code: code, Message: msg}}
+				errIndices = append(errIndices, i)
+				continue
+			}
+			row := make(map[string]interface{})
+			if rows.Next() {
+				if err := rows.MapScan(row); err != nil {
+					rows.Close()
+					results[i] = map[string]interface{}{"error": model.ErrorDetail{Code: 500, Message: "Failed to scan result: " + err.Error()}}
+					errIndices = append(errIndices, i)
+					continue
+				}
+				cleanMapValues(row)
+			}
+			rows.Close()
+			results[i] = row
+		} else {
+			_, err := db.ExecContext(r.Context(), sqlStr, args...)
+			if err != nil {
+				code, msg := classifyDBError(err, "Insert failed")
+				results[i] = map[string]interface{}{"error": model.ErrorDetail{Code: code, Message: msg}}
+				errIndices = append(errIndices, i)
+				continue
+			}
+			results[i] = rec
+		}
+		succeeded++
+	}
+
+	took := time.Since(start)
+	status := http.StatusCreated
+	if len(errIndices) > 0 {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, model.BatchResponse{
+		Resource: results,
+		Meta: &model.BatchResponseMeta{
+			Count:     len(records),
+			Succeeded: succeeded,
+			Failed:    len(errIndices),
+			Errors:    errIndices,
+			TookMs:    float64(took.Microseconds()) / 1000.0,
+		},
+	})
+}
+
+// execInsert executes an INSERT statement and returns created records (if RETURNING is supported)
+// or nil (caller uses input records as fallback).
+func execInsert(ctx context.Context, exec connector.QueryExecutor, conn connector.Connector, sqlStr string, args []interface{}) ([]map[string]interface{}, error) {
+	if conn.SupportsReturning() {
+		rows, err := exec.QueryxContext(ctx, sqlStr, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var created []map[string]interface{}
 		for rows.Next() {
 			row := make(map[string]interface{})
 			if err := rows.MapScan(row); err != nil {
-				writeError(w, http.StatusInternalServerError, "Failed to scan result: "+err.Error())
-				return
+				return nil, err
 			}
 			cleanMapValues(row)
 			created = append(created, row)
 		}
 		if err := rows.Err(); err != nil {
-			writeError(w, http.StatusInternalServerError, "Row iteration error: "+err.Error())
-			return
+			return nil, err
 		}
+		return created, nil
+	}
+	_, err := exec.ExecContext(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, err
+	}
+	return nil, nil // caller uses input records
+}
 
-		took := time.Since(start)
+// writeCreateResponse writes the standard POST response.
+func writeCreateResponse(w http.ResponseWriter, conn connector.Connector, created []map[string]interface{}, inputRecords []map[string]interface{}, took time.Duration) {
+	if created != nil {
 		writeJSON(w, http.StatusCreated, model.ListResponse{
 			Resource: created,
 			Meta: &model.ResponseMeta{
@@ -302,22 +429,10 @@ func (h *TableHandler) CreateRecords(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
-	// For connectors without RETURNING, execute and report rows affected.
-	result, err := db.ExecContext(r.Context(), sqlStr, args...)
-	if err != nil {
-		code, msg := classifyDBError(err, "Insert failed")
-		writeError(w, code, msg)
-		return
-	}
-
-	affected, _ := result.RowsAffected()
-	took := time.Since(start)
-
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"resource": records,
-		"meta": model.ResponseMeta{
-			Count:  int(affected),
+	writeJSON(w, http.StatusCreated, model.ListResponse{
+		Resource: inputRecords,
+		Meta: &model.ResponseMeta{
+			Count:  len(inputRecords),
 			TookMs: float64(took.Microseconds()) / 1000.0,
 		},
 	})
@@ -325,6 +440,11 @@ func (h *TableHandler) CreateRecords(w http.ResponseWriter, r *http.Request) {
 
 // ReplaceRecords performs a full record replacement (PUT) on a table.
 // PUT /api/v1/{serviceName}/_table/{tableName}
+//
+// Batch modes (query parameters):
+//   - (default)         halt on first error; prior updates are committed
+//   - ?rollback=true    wrap in transaction; all-or-nothing
+//   - ?continue=true    update each record independently; report mixed results
 func (h *TableHandler) ReplaceRecords(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
@@ -337,7 +457,6 @@ func (h *TableHandler) ReplaceRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse request body.
 	records, err := parseRecordsBody(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
@@ -348,52 +467,73 @@ func (h *TableHandler) ReplaceRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	db := conn.DB()
-	updated := make([]map[string]interface{}, 0)
+	mode := parseBatchMode(r)
 
-	// Each record in a PUT is a full replacement keyed by ID.
-	for _, record := range records {
-		ids, filter := extractIDsOrFilter(record, r)
+	// Choose executor: transaction for rollback mode, raw DB otherwise.
+	var exec connector.QueryExecutor
+	var tx *sqlx.Tx
+	exec = conn.DB()
 
-		updateReq := connector.UpdateRequest{
-			Table:  tableName,
-			Record: record,
-			Filter: filter,
-			IDs:    ids,
-		}
-
-		sqlStr, args, err := conn.BuildUpdate(r.Context(), updateReq)
+	if mode == BatchModeRollback {
+		tx, err = conn.BeginTx(r.Context(), nil)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Failed to build update: "+err.Error())
+			writeError(w, http.StatusInternalServerError, "Failed to begin transaction: "+err.Error())
 			return
 		}
+		defer tx.Rollback()
+		exec = tx
+	}
 
-		if conn.SupportsReturning() {
-			rows, err := db.QueryxContext(r.Context(), sqlStr, args...)
+	// For continue mode, collect per-record results.
+	if mode == BatchModeContinue {
+		results := make([]interface{}, len(records))
+		var errIndices []int
+		succeeded := 0
+
+		for i, record := range records {
+			ids, filter := extractIDsOrFilter(record, r)
+			result, err := execSingleUpdate(r.Context(), exec, conn, tableName, record, filter, ids)
 			if err != nil {
 				code, msg := classifyDBError(err, "Update failed")
-				writeError(w, code, msg)
-				return
+				results[i] = map[string]interface{}{"error": model.ErrorDetail{Code: code, Message: msg}}
+				errIndices = append(errIndices, i)
+				continue
 			}
-			for rows.Next() {
-				row := make(map[string]interface{})
-				if err := rows.MapScan(row); err != nil {
-					rows.Close()
-					writeError(w, http.StatusInternalServerError, "Failed to scan result: "+err.Error())
-					return
-				}
-				cleanMapValues(row)
-				updated = append(updated, row)
-			}
-			rows.Close()
-		} else {
-			_, err := db.ExecContext(r.Context(), sqlStr, args...)
-			if err != nil {
-				code, msg := classifyDBError(err, "Update failed")
-				writeError(w, code, msg)
-				return
-			}
-			updated = append(updated, record)
+			results[i] = result
+			succeeded++
+		}
+
+		took := time.Since(start)
+		writeJSON(w, http.StatusOK, model.BatchResponse{
+			Resource: results,
+			Meta: &model.BatchResponseMeta{
+				Count:     len(records),
+				Succeeded: succeeded,
+				Failed:    len(errIndices),
+				Errors:    errIndices,
+				TookMs:    float64(took.Microseconds()) / 1000.0,
+			},
+		})
+		return
+	}
+
+	// Halt and rollback modes: stop at first error.
+	updated := make([]map[string]interface{}, 0)
+	for _, record := range records {
+		ids, filter := extractIDsOrFilter(record, r)
+		result, err := execSingleUpdate(r.Context(), exec, conn, tableName, record, filter, ids)
+		if err != nil {
+			code, msg := classifyDBError(err, "Update failed")
+			writeError(w, code, msg)
+			return
+		}
+		updated = append(updated, result)
+	}
+
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to commit transaction: "+err.Error())
+			return
 		}
 	}
 
@@ -407,8 +547,46 @@ func (h *TableHandler) ReplaceRecords(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// execSingleUpdate builds and executes a single UPDATE for one record, returning the result row.
+func execSingleUpdate(ctx context.Context, exec connector.QueryExecutor, conn connector.Connector, tableName string, record map[string]interface{}, filter string, ids []interface{}) (map[string]interface{}, error) {
+	updateReq := connector.UpdateRequest{
+		Table:  tableName,
+		Record: record,
+		Filter: filter,
+		IDs:    ids,
+	}
+	sqlStr, args, err := conn.BuildUpdate(ctx, updateReq)
+	if err != nil {
+		return nil, err
+	}
+
+	if conn.SupportsReturning() {
+		rows, err := exec.QueryxContext(ctx, sqlStr, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		row := make(map[string]interface{})
+		if rows.Next() {
+			if err := rows.MapScan(row); err != nil {
+				return nil, err
+			}
+			cleanMapValues(row)
+		}
+		return row, rows.Err()
+	}
+
+	_, err = exec.ExecContext(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, err
+	}
+	return record, nil
+}
+
 // UpdateRecords partially updates records matching a filter or ID list.
 // PATCH /api/v1/{serviceName}/_table/{tableName}
+//
+// Batch modes: ?rollback=true wraps the UPDATE in a transaction.
 func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
@@ -421,14 +599,12 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse the request body for the fields to update.
 	var body map[string]interface{}
 	if err := readJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
 
-	// Extract the filter from query params or body.
 	filterStr := queryString(r, "filter")
 	var filterSQL string
 	var filterParams []interface{}
@@ -447,7 +623,6 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract IDs from query params or body.
 	var ids []interface{}
 	if idsRaw, ok := body["ids"]; ok {
 		if idSlice, ok := idsRaw.([]interface{}); ok {
@@ -461,7 +636,6 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// If body has a "resource" wrapper, use the first record's fields.
 	record := body
 	if res, ok := body["resource"]; ok {
 		if resSlice, ok := res.([]interface{}); ok && len(resSlice) > 0 {
@@ -471,7 +645,6 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Remove meta-keys that aren't actual column values.
 	delete(record, "resource")
 	delete(record, "ids")
 
@@ -498,20 +671,32 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Merge args in SQL placeholder order: SET values, then filter params,
-	// then ID params. BuildUpdate returns [set_values..., id_values...],
-	// and filter params must be spliced between them.
 	numSetArgs := len(record)
 	allArgs := make([]interface{}, 0, len(args)+len(filterParams))
 	allArgs = append(allArgs, args[:numSetArgs]...)
 	allArgs = append(allArgs, filterParams...)
 	allArgs = append(allArgs, args[numSetArgs:]...)
 
-	db := conn.DB()
+	// Choose executor: transaction for rollback mode, raw DB otherwise.
+	mode := parseBatchMode(r)
+	var exec connector.QueryExecutor
+	var tx *sqlx.Tx
+	exec = conn.DB()
+
+	if mode == BatchModeRollback {
+		tx, err = conn.BeginTx(r.Context(), nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to begin transaction: "+err.Error())
+			return
+		}
+		defer tx.Rollback()
+		exec = tx
+	}
+
 	updated := make([]map[string]interface{}, 0)
 
 	if conn.SupportsReturning() {
-		rows, err := db.QueryxContext(r.Context(), sqlStr, allArgs...)
+		rows, err := exec.QueryxContext(r.Context(), sqlStr, allArgs...)
 		if err != nil {
 			code, msg := classifyDBError(err, "Update failed")
 			writeError(w, code, msg)
@@ -533,15 +718,21 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		result, err := db.ExecContext(r.Context(), sqlStr, allArgs...)
+		result, err := exec.ExecContext(r.Context(), sqlStr, allArgs...)
 		if err != nil {
 			code, msg := classifyDBError(err, "Update failed")
 			writeError(w, code, msg)
 			return
 		}
 		affected, _ := result.RowsAffected()
-		// Without RETURNING we can't return the full rows.
 		updated = append(updated, map[string]interface{}{"rows_affected": affected})
+	}
+
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to commit transaction: "+err.Error())
+			return
+		}
 	}
 
 	took := time.Since(start)
@@ -556,6 +747,8 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 
 // DeleteRecords removes records matching a filter or ID list.
 // DELETE /api/v1/{serviceName}/_table/{tableName}
+//
+// Batch modes: ?rollback=true wraps the DELETE in a transaction.
 func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
@@ -568,7 +761,6 @@ func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract filter from query params.
 	filterStr := queryString(r, "filter")
 	var filterSQL string
 	var filterParams []interface{}
@@ -587,7 +779,6 @@ func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract IDs from query string or request body.
 	var ids []interface{}
 	if idsStr := queryString(r, "ids"); idsStr != "" {
 		for _, id := range strings.Split(idsStr, ",") {
@@ -595,7 +786,6 @@ func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Also check request body for IDs.
 	if len(ids) == 0 {
 		var body struct {
 			IDs      []interface{} `json:"ids"`
@@ -603,7 +793,6 @@ func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 				ID interface{} `json:"id"`
 			} `json:"resource"`
 		}
-		// Body may be empty for DELETE; ignore decode errors.
 		if err := readJSON(r, &body); err == nil {
 			if len(body.IDs) > 0 {
 				ids = body.IDs
@@ -634,15 +823,36 @@ func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Merge filter params with query args.
 	allArgs := append(filterParams, args...)
 
-	db := conn.DB()
-	result, err := db.ExecContext(r.Context(), sqlStr, allArgs...)
+	// Choose executor: transaction for rollback mode, raw DB otherwise.
+	mode := parseBatchMode(r)
+	var exec connector.QueryExecutor
+	var tx *sqlx.Tx
+	exec = conn.DB()
+
+	if mode == BatchModeRollback {
+		tx, err = conn.BeginTx(r.Context(), nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to begin transaction: "+err.Error())
+			return
+		}
+		defer tx.Rollback()
+		exec = tx
+	}
+
+	result, err := exec.ExecContext(r.Context(), sqlStr, allArgs...)
 	if err != nil {
 		code, msg := classifyDBError(err, "Delete failed")
 		writeError(w, code, msg)
 		return
+	}
+
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to commit transaction: "+err.Error())
+			return
+		}
 	}
 
 	affected, _ := result.RowsAffected()

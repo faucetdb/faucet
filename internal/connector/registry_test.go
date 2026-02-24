@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"testing"
@@ -31,8 +32,11 @@ func (m *mockConnector) Disconnect() error {
 	m.connected = false
 	return nil
 }
-func (m *mockConnector) Ping(_ context.Context) error                     { return nil }
-func (m *mockConnector) DB() *sqlx.DB                                     { return nil }
+func (m *mockConnector) Ping(_ context.Context) error                          { return nil }
+func (m *mockConnector) DB() *sqlx.DB                                          { return nil }
+func (m *mockConnector) BeginTx(_ context.Context, _ *sql.TxOptions) (*sqlx.Tx, error) {
+	return nil, fmt.Errorf("mock: transactions not supported")
+}
 func (m *mockConnector) IntrospectSchema(_ context.Context) (*model.Schema, error) {
 	return nil, nil
 }

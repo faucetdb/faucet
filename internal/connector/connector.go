@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"database/sql"
 	"net/url"
 	"regexp"
 	"strings"
@@ -12,6 +13,14 @@ import (
 
 	"github.com/faucetdb/faucet/internal/model"
 )
+
+// QueryExecutor is the common interface satisfied by both *sqlx.DB and *sqlx.Tx,
+// allowing handlers to execute queries transparently inside or outside a transaction.
+type QueryExecutor interface {
+	QueryxContext(ctx context.Context, query string, args ...interface{}) (*sqlx.Rows, error)
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	QueryRowxContext(ctx context.Context, query string, args ...interface{}) *sqlx.Row
+}
 
 // SelectRequest represents a query for records.
 type SelectRequest struct {
@@ -74,6 +83,7 @@ type Connector interface {
 	Disconnect() error
 	Ping(ctx context.Context) error
 	DB() *sqlx.DB
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sqlx.Tx, error)
 
 	// Schema introspection
 	IntrospectSchema(ctx context.Context) (*model.Schema, error)
