@@ -288,7 +288,7 @@ func (h *TableHandler) CreateRecords(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "Failed to begin transaction: "+err.Error())
 			return
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 		exec = tx
 
 		// Execute + commit in rollback mode.
@@ -480,7 +480,7 @@ func (h *TableHandler) ReplaceRecords(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "Failed to begin transaction: "+err.Error())
 			return
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 		exec = tx
 	}
 
@@ -689,7 +689,7 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "Failed to begin transaction: "+err.Error())
 			return
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 		exec = tx
 	}
 
@@ -837,7 +837,7 @@ func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "Failed to begin transaction: "+err.Error())
 			return
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 		exec = tx
 	}
 
