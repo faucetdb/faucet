@@ -95,11 +95,15 @@ func runAdminCreate(email, password, name string) error {
 
 	passwordHash := config.HashAPIKey(password)
 
+	// Check if this is the first admin — make them super admin
+	hasAdmin, _ := store.HasAnyAdmin(ctx)
+
 	admin := &model.Admin{
 		Email:        email,
 		PasswordHash: passwordHash,
 		Name:         name,
 		IsActive:     true,
+		IsSuperAdmin: !hasAdmin,
 	}
 
 	if err := store.CreateAdmin(ctx, admin); err != nil {

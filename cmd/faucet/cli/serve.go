@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
+	"github.com/faucetdb/faucet/internal/model"
 	"github.com/faucetdb/faucet/internal/server"
 	"github.com/faucetdb/faucet/internal/service"
 	"github.com/faucetdb/faucet/internal/telemetry"
@@ -154,14 +156,30 @@ func runServeDaemon(host string, port int, noUI, dev bool) error {
 		fmt.Fprintf(os.Stderr, "  check logs: %s\n\n", logPath)
 	}
 
-	fmt.Printf("  Faucet %s\n", versionString())
+	fmt.Printf("  Faucet %s | Database → API in seconds\n", versionString())
 	fmt.Printf("  Listening on http://%s:%d\n", host, port)
 	if !noUI {
 		fmt.Printf("  Admin UI:   http://%s:%d/admin\n", host, port)
 	}
 	fmt.Printf("  OpenAPI:    http://%s:%d/openapi.json\n", host, port)
-	fmt.Printf("  Health:     http://%s:%d/healthz\n", host, port)
+	fmt.Printf("  MCP:        http://%s:%d/mcp\n", host, port)
 	fmt.Println()
+
+	// Check if setup is needed via the API
+	setupURL := fmt.Sprintf("http://127.0.0.1:%d/api/v1/setup", port)
+	if resp, err := client.Get(setupURL); err == nil {
+		defer resp.Body.Close()
+		var setupStatus struct {
+			NeedsSetup bool `json:"needs_setup"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&setupStatus) == nil && setupStatus.NeedsSetup {
+			fmt.Printf("  First run detected! Set up your admin account:\n")
+			fmt.Printf("    Web UI:  http://%s:%d/setup\n", host, port)
+			fmt.Printf("    CLI:     faucet admin create --email admin@example.com --password changeme123\n")
+			fmt.Println()
+		}
+	}
+
 	fmt.Printf("  Server running in background (PID %d)\n", pid)
 	fmt.Printf("  Logs: %s\n", logPath)
 	fmt.Println()
@@ -235,7 +253,31 @@ func runServe(host string, port int, noUI, dev bool) error {
 		logger.Warn("failed to check for admin", "error", err)
 	}
 	if !hasAdmin {
-		logger.Warn("no admin account found - visit /setup or run: faucet admin create")
+		// Check for environment variable auto-setup
+		envEmail := os.Getenv("FAUCET_ADMIN_EMAIL")
+		envPassword := os.Getenv("FAUCET_ADMIN_PASSWORD")
+		if envEmail != "" && envPassword != "" {
+			if len(envPassword) < 8 {
+				logger.Error("FAUCET_ADMIN_PASSWORD must be at least 8 characters")
+			} else {
+				admin := &model.Admin{
+					Email:        envEmail,
+					PasswordHash: config.HashAPIKey(envPassword),
+					Name:         "Admin",
+					IsActive:     true,
+					IsSuperAdmin: true,
+				}
+				if err := store.CreateAdmin(cmd_ctx(), admin); err != nil {
+					logger.Error("failed to create admin from env vars", "error", err)
+				} else {
+					hasAdmin = true
+					logger.Info("admin account created from environment variables", "email", envEmail)
+				}
+			}
+		}
+		if !hasAdmin {
+			logger.Warn("no admin account found — visit /setup or run: faucet admin create --email admin@example.com --password changeme123")
+		}
 	}
 
 	// 6. Initialize telemetry
@@ -317,14 +359,21 @@ func runServe(host string, port int, noUI, dev bool) error {
 
 	srv := server.New(srvCfg, registry, store, authSvc, logger)
 
-	fmt.Printf("→ Faucet %s\n", versionString())
+	fmt.Printf("→ Faucet %s | Database → API in seconds\n", versionString())
 	fmt.Printf("→ Listening on http://%s:%d\n", host, port)
 	if !noUI {
 		fmt.Printf("→ Admin UI:   http://%s:%d/admin\n", host, port)
 	}
 	fmt.Printf("→ OpenAPI:    http://%s:%d/openapi.json\n", host, port)
-	fmt.Printf("→ Health:     http://%s:%d/healthz\n", host, port)
+	fmt.Printf("→ MCP:        http://%s:%d/mcp\n", host, port)
 	fmt.Printf("→ Connected databases: %d\n", len(registry.ListServices()))
+	if !hasAdmin {
+		fmt.Println()
+		fmt.Printf("→ First run detected! Set up your admin account:\n")
+		fmt.Printf("→   Web UI:  http://%s:%d/setup\n", host, port)
+		fmt.Printf("→   CLI:     faucet admin create --email admin@example.com --password changeme123\n")
+		fmt.Printf("→   Env:     FAUCET_ADMIN_EMAIL=... FAUCET_ADMIN_PASSWORD=... faucet serve\n")
+	}
 	fmt.Println()
 
 	return srv.ListenAndServe()

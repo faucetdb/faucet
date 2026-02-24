@@ -11,10 +11,14 @@ const DB_DRIVERS = [
   { value: 'snowflake', label: 'Snowflake' },
 ];
 
-export function Setup() {
+interface SetupProps {
+  onComplete?: () => void;
+}
+
+export function Setup({ onComplete }: SetupProps = {}) {
   const [step, setStep] = useState<Step>('welcome');
   const [adminForm, setAdminForm] = useState({
-    username: 'admin',
+    email: '',
     password: '',
     confirmPassword: '',
   });
@@ -40,16 +44,22 @@ export function Setup() {
     setSaving(true);
     setError(null);
     try {
-      const res = await apiFetch('/api/v1/system/admin', {
+      const res = await fetch('/api/v1/setup', {
         method: 'POST',
-        body: {
-          username: adminForm.username,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: adminForm.email,
           password: adminForm.password,
-        },
+        }),
       });
-      // If we get a session token, store it
-      if (res.session_token) {
-        localStorage.setItem('faucet_session', res.session_token);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error?.message || `Setup failed (${res.status})`);
+      }
+      const data = await res.json();
+      // Store the session token so subsequent API calls are authenticated
+      if (data.session_token) {
+        localStorage.setItem('faucet_session', data.session_token);
       }
       setStep('database');
     } catch (err) {
@@ -176,12 +186,14 @@ export function Setup() {
 
               <div class="space-y-4">
                 <div>
-                  <label class="block text-sm font-medium text-text-secondary mb-1.5">Username</label>
+                  <label class="block text-sm font-medium text-text-secondary mb-1.5">Email</label>
                   <input
-                    type="text"
+                    type="email"
                     class="input w-full"
-                    value={adminForm.username}
-                    onInput={(e) => setAdminForm({ ...adminForm, username: (e.target as HTMLInputElement).value })}
+                    placeholder="admin@example.com"
+                    value={adminForm.email}
+                    autoFocus
+                    onInput={(e) => setAdminForm({ ...adminForm, email: (e.target as HTMLInputElement).value })}
                   />
                 </div>
                 <div>
@@ -209,7 +221,7 @@ export function Setup() {
               <div class="flex justify-end mt-6 pt-4 border-t border-border-subtle">
                 <button
                   onClick={handleAdminSubmit}
-                  disabled={saving || !adminForm.password}
+                  disabled={saving || !adminForm.email || !adminForm.password}
                   class="btn-primary"
                 >
                   {saving ? 'Creating...' : 'Create Admin & Continue'}
@@ -323,15 +335,29 @@ export function Setup() {
               </p>
               <div class="flex items-center justify-center gap-3">
                 <button
-                  onClick={() => route('/', true)}
+                  onClick={() => {
+                    if (onComplete) {
+                      onComplete();
+                    } else {
+                      window.location.href = '/';
+                    }
+                  }}
                   class="btn-primary text-base px-6 py-2.5"
                 >
                   Go to Dashboard
                 </button>
                 {!skipDb && (
-                  <a href="/schema" class="btn-secondary text-base px-6 py-2.5">
+                  <button
+                    onClick={() => {
+                      if (onComplete) {
+                        onComplete();
+                      }
+                      route('/schema', true);
+                    }}
+                    class="btn-secondary text-base px-6 py-2.5"
+                  >
                     Explore Schema
-                  </a>
+                  </button>
                 )}
               </div>
             </div>

@@ -28,31 +28,23 @@ export function App() {
     const session = localStorage.getItem('faucet_session');
 
     if (!session) {
-      // No session -- check if any admins exist by trying to login with empty creds
-      // If we get a specific error, the system is set up. If server returns something else, might need setup.
+      // Check setup status via dedicated endpoint
       try {
-        const res = await fetch('/api/v1/system/admin/session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: '', password: '' }),
-        });
-        if (res.status === 404 || res.status === 503) {
-          // Server might not be running or endpoint doesn't exist
-          setAuthState('login');
-        } else {
-          // Server is up, login endpoint exists -- system is set up, need to login
-          const body = await res.json().catch(() => ({}));
-          // Check if the error indicates no admins exist
-          if (body.error?.message?.toLowerCase().includes('no admin') ||
-              body.error?.message?.toLowerCase().includes('not found')) {
+        const res = await fetch('/api/v1/setup');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.needs_setup) {
             setAuthState('setup');
             route('/setup', true);
           } else {
             setAuthState('login');
           }
+        } else {
+          // Server error — show login, they'll see errors
+          setAuthState('login');
         }
       } catch {
-        // Can't reach server -- show login anyway, they'll see errors
+        // Can't reach server — show login anyway
         setAuthState('login');
       }
       return;
@@ -116,7 +108,10 @@ export function App() {
   if (authState === 'setup') {
     return (
       <div class="min-h-screen bg-surface">
-        <Setup />
+        <Setup onComplete={() => {
+          setAuthState('authenticated');
+          route('/', true);
+        }} />
       </div>
     );
   }

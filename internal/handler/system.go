@@ -35,6 +35,102 @@ func NewSystemHandler(store *config.Store, authSvc *service.AuthService, registr
 }
 
 // ---------------------------------------------------------------------------
+// First-run setup (unauthenticated — only works when no admin exists)
+// ---------------------------------------------------------------------------
+
+// SetupStatus returns the current setup state of the Faucet instance.
+// GET /api/v1/setup
+func (h *SystemHandler) SetupStatus(w http.ResponseWriter, r *http.Request) {
+	hasAdmin, err := h.store.HasAnyAdmin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to check setup status: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"setup_complete": hasAdmin,
+		"needs_setup":    !hasAdmin,
+	})
+}
+
+// setupRequest is the expected payload for the first-run setup endpoint.
+type setupRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Name     string `json:"name"`
+}
+
+// SetupCreateAdmin creates the first admin account during initial setup.
+// This endpoint only works when no admin exists. It creates the admin and
+// returns a JWT session token so the UI can immediately authenticate.
+// POST /api/v1/setup
+func (h *SystemHandler) SetupCreateAdmin(w http.ResponseWriter, r *http.Request) {
+	// Guard: only works when no admin exists
+	hasAdmin, err := h.store.HasAnyAdmin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to check setup status: "+err.Error())
+		return
+	}
+	if hasAdmin {
+		writeError(w, http.StatusForbidden, "Setup already complete — admin account exists")
+		return
+	}
+
+	var req setupRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	if req.Email == "" {
+		writeError(w, http.StatusBadRequest, "Email is required")
+		return
+	}
+	if req.Password == "" {
+		writeError(w, http.StatusBadRequest, "Password is required")
+		return
+	}
+	if len(req.Password) < 8 {
+		writeError(w, http.StatusBadRequest, "Password must be at least 8 characters")
+		return
+	}
+
+	// Hash the password and create the admin
+	passwordHash := config.HashAPIKey(req.Password)
+	admin := &model.Admin{
+		Email:        req.Email,
+		PasswordHash: passwordHash,
+		Name:         req.Name,
+		IsActive:     true,
+		IsSuperAdmin: true,
+	}
+
+	if err := h.store.CreateAdmin(r.Context(), admin); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create admin: "+err.Error())
+		return
+	}
+
+	// Issue a JWT so the UI can immediately authenticate
+	ttl := 24 * time.Hour
+	token, err := h.authSvc.IssueJWT(r.Context(), admin.ID, admin.Email, ttl)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Admin created but failed to issue token: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"session_token": token,
+		"token_type":    "bearer",
+		"expires_in":    int(ttl.Seconds()),
+		"admin": map[string]interface{}{
+			"id":    admin.ID,
+			"email": admin.Email,
+			"name":  admin.Name,
+		},
+	})
+}
+
+// ---------------------------------------------------------------------------
 // Authentication
 // ---------------------------------------------------------------------------
 

@@ -109,9 +109,13 @@ func (s *Server) setupRouter() {
 	// --- API routes ---
 	r.Route("/api/v1", func(r chi.Router) {
 
+		// Setup endpoints — unauthenticated, only work when no admin exists
+		sysHandler := handler.NewSystemHandler(s.store, s.authSvc, s.registry)
+		r.Get("/setup", sysHandler.SetupStatus)
+		r.Post("/setup", sysHandler.SetupCreateAdmin)
+
 		// System APIs (admin management)
 		r.Route("/system", func(r chi.Router) {
-			sysHandler := handler.NewSystemHandler(s.store, s.authSvc, s.registry)
 
 			// Session endpoints are unauthenticated (login) or self-authenticated (logout)
 			r.Post("/admin/session", sysHandler.Login)
