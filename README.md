@@ -17,9 +17,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/faucetdb/wiki">Docs</a> &middot;
+  <a href="https://wiki.faucetdb.ai">Docs</a> &middot;
   <a href="#60-second-quickstart">Getting Started</a> &middot;
-  <a href="#docker">Docker</a> &middot;
+  <a href="https://hub.docker.com/r/faucetdb/faucet">Docker</a> &middot;
   <a href="#mcp-server-for-ai-agents">MCP Server</a> &middot;
   <a href="https://github.com/faucetdb/faucet/issues">Issues</a>
 </p>
@@ -317,7 +317,7 @@ make dev        # Dev mode with hot reload
 
 ## Documentation
 
-Full documentation is available at the [Faucet Wiki](https://github.com/faucetdb/wiki).
+Full documentation is available at the [Faucet Wiki](https://wiki.faucetdb.ai).
 
 ## Contributing
 
