@@ -101,6 +101,7 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 - **JWT authentication** — HMAC-SHA256 signed tokens for admin sessions
 - **Role-based access control (RBAC)** — Per-table verb permissions (GET, POST, PUT, DELETE)
 - **Row-level security filters** — Restrict data access per role with SQL filter expressions
+- **Schema contract locking** — Lock your API contract against silent breaking schema changes with three modes (none, auto, strict), drift detection, and CLI management
 
 ### AI Agent Integration (MCP)
 - **Built-in MCP server** — 8 tools + 2 resources for Model Context Protocol
@@ -222,6 +223,10 @@ faucet db add NAME              # Add database connection
 faucet db list                  # List configured databases
 faucet db test NAME             # Test database connectivity
 faucet db schema NAME           # Dump database schema
+faucet db lock NAME             # Lock schema contract
+faucet db unlock NAME           # Remove contract locks
+faucet db diff NAME             # Show schema drift
+faucet db promote NAME          # Promote contracts to match live schema
 faucet key create               # Create API key
 faucet key list                 # List API keys
 faucet role create              # Create RBAC role
@@ -276,7 +281,7 @@ POST   /api/v1/{service}/_proc/{proc}            # Call procedure
 ## FAQ
 
 **How is Faucet different from PostgREST?**
-PostgREST only supports PostgreSQL. Faucet supports 5+ databases (PostgreSQL, MySQL, SQL Server, Snowflake, SQLite), includes a built-in admin UI, and provides native MCP support for AI agents — all in a single binary.
+PostgREST only supports PostgreSQL. Faucet supports 6 databases (PostgreSQL, MySQL, MariaDB, SQL Server, Snowflake, SQLite), includes a built-in admin UI, and provides native MCP support for AI agents — all in a single binary.
 
 **How is Faucet different from Hasura?**
 Hasura requires Docker, a PostgreSQL metadata database, and is primarily GraphQL-focused. Faucet is a single binary with no dependencies, generates REST APIs (not GraphQL), and includes built-in MCP server support for AI agent integration.
@@ -310,7 +315,7 @@ make dev        # Dev mode with hot reload
 
 ## Tech Stack
 
-- **Go 1.24+** — Chi router, sqlx, Cobra/Viper CLI
+- **Go 1.25+** — Chi router, sqlx, Cobra/Viper CLI
 - **Preact + Vite + Tailwind** — Embedded admin UI
 - **SQLite** (pure Go, no CGO) — Configuration store
 - **MCP** (Model Context Protocol) — AI agent integration
