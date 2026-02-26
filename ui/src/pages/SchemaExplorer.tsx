@@ -19,8 +19,34 @@ interface ColumnInfo {
   };
 }
 
+interface DriftItem {
+  type: 'additive' | 'breaking';
+  category: string;
+  table_name: string;
+  column_name?: string;
+  old_value?: string;
+  new_value?: string;
+  description: string;
+}
+
+interface TableDrift {
+  table_name: string;
+  has_drift: boolean;
+  has_breaking: boolean;
+  items: DriftItem[];
+}
+
+interface ServiceDriftReport {
+  service_name: string;
+  tables: TableDrift[];
+  has_drift: boolean;
+  has_breaking: boolean;
+  total_additive: number;
+  total_breaking: number;
+}
+
 export function SchemaExplorer() {
-  const [services, setServices] = useState<{ name: string; driver: string }[]>([]);
+  const [services, setServices] = useState<{ name: string; driver: string; schema_lock?: string }[]>([]);
   const [selectedService, setSelectedService] = useState('');
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [selectedTable, setSelectedTable] = useState('');
@@ -29,12 +55,23 @@ export function SchemaExplorer() {
   const [loadingColumns, setLoadingColumns] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Contract locking state
+  const [lockMode, setLockMode] = useState<string>('none');
+  const [lockedTables, setLockedTables] = useState<Set<string>>(new Set());
+  const [driftReport, setDriftReport] = useState<ServiceDriftReport | null>(null);
+  const [lockLoading, setLockLoading] = useState<string | null>(null); // table name being locked/unlocked
+  const [promoteLoading, setPromoteLoading] = useState(false);
+  const [modeLoading, setModeLoading] = useState(false);
+
   useEffect(() => {
     apiFetch('/api/v1/system/service')
       .then((res) => {
-        const svcs = (res.resource || []).map((s: any) => ({ name: s.name, driver: s.driver }));
+        const svcs = (res.resource || []).map((s: any) => ({
+          name: s.name,
+          driver: s.driver,
+          schema_lock: s.schema_lock || 'none',
+        }));
         setServices(svcs);
-        // Check URL params for pre-selected service
         const params = new URLSearchParams(window.location.search);
         const svcParam = params.get('service');
         if (svcParam && svcs.find((s: any) => s.name === svcParam)) {
@@ -46,6 +83,7 @@ export function SchemaExplorer() {
       .catch(() => setServices([]));
   }, []);
 
+  // Load tables when service changes
   useEffect(() => {
     if (!selectedService) return;
     setLoadingTables(true);
@@ -53,7 +91,6 @@ export function SchemaExplorer() {
     setColumns([]);
     apiFetch(`/api/v1/${selectedService}/_schema`)
       .then((res) => {
-        // The schema endpoint returns table info - could be resource array or table_names
         const tableData = res.resource || res.tables || [];
         const parsed: TableInfo[] = tableData.map((t: any) =>
           typeof t === 'string' ? { name: t } : { name: t.name, type: t.type }
@@ -64,6 +101,31 @@ export function SchemaExplorer() {
       .finally(() => setLoadingTables(false));
   }, [selectedService]);
 
+  // Load contracts + drift when service changes
+  useEffect(() => {
+    if (!selectedService) return;
+    const svc = services.find((s) => s.name === selectedService);
+    setLockMode(svc?.schema_lock || 'none');
+    loadContracts();
+  }, [selectedService, services]);
+
+  function loadContracts() {
+    if (!selectedService) return;
+    // Load locked tables
+    apiFetch(`/api/v1/system/contract/${selectedService}`)
+      .then((res) => {
+        const contracts = res.contracts || [];
+        setLockedTables(new Set(contracts.map((c: any) => c.table_name)));
+      })
+      .catch(() => setLockedTables(new Set()));
+
+    // Load drift report
+    apiFetch(`/api/v1/system/contract/${selectedService}/diff`)
+      .then((res) => setDriftReport(res))
+      .catch(() => setDriftReport(null));
+  }
+
+  // Load columns when table changes
   useEffect(() => {
     if (!selectedService || !selectedTable) return;
     setLoadingColumns(true);
@@ -80,6 +142,78 @@ export function SchemaExplorer() {
     t.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  function getDriftForTable(tableName: string): TableDrift | undefined {
+    return driftReport?.tables?.find((t) => t.table_name === tableName);
+  }
+
+  async function handleLockToggle(tableName: string) {
+    setLockLoading(tableName);
+    try {
+      if (lockedTables.has(tableName)) {
+        await apiFetch(`/api/v1/system/contract/${selectedService}/${tableName}`, { method: 'DELETE' });
+      } else {
+        await apiFetch(`/api/v1/system/contract/${selectedService}/${tableName}`, { method: 'POST' });
+      }
+      loadContracts();
+    } catch {
+      // ignore
+    } finally {
+      setLockLoading(null);
+    }
+  }
+
+  async function handlePromote(tableName: string) {
+    setPromoteLoading(true);
+    try {
+      await apiFetch(`/api/v1/system/contract/${selectedService}/${tableName}/promote`, { method: 'POST' });
+      loadContracts();
+    } catch {
+      // ignore
+    } finally {
+      setPromoteLoading(false);
+    }
+  }
+
+  async function handleModeChange(mode: string) {
+    setModeLoading(true);
+    try {
+      await apiFetch(`/api/v1/system/contract/${selectedService}/mode`, {
+        method: 'PUT',
+        body: { mode },
+      });
+      setLockMode(mode);
+      // Update services state to reflect the change
+      setServices((prev) =>
+        prev.map((s) => (s.name === selectedService ? { ...s, schema_lock: mode } : s))
+      );
+      loadContracts();
+    } catch {
+      // ignore
+    } finally {
+      setModeLoading(false);
+    }
+  }
+
+  function driftBadge(tableName: string) {
+    const isLocked = lockedTables.has(tableName);
+    if (!isLocked) return null;
+
+    const drift = getDriftForTable(tableName);
+    if (!drift || !drift.has_drift) {
+      return (
+        <span class="w-2 h-2 rounded-full bg-success shrink-0" title="Locked - No drift" />
+      );
+    }
+    if (drift.has_breaking) {
+      return (
+        <span class="w-2 h-2 rounded-full bg-error shrink-0 animate-pulse" title="Breaking drift detected" />
+      );
+    }
+    return (
+      <span class="w-2 h-2 rounded-full bg-warning shrink-0" title="Additive drift detected" />
+    );
+  }
+
   function typeColor(type: string | undefined): string {
     if (!type) return 'text-text-secondary';
     const t = type.toLowerCase();
@@ -92,6 +226,9 @@ export function SchemaExplorer() {
     return 'text-text-secondary';
   }
 
+  const selectedTableDrift = selectedTable ? getDriftForTable(selectedTable) : undefined;
+  const isSelectedLocked = selectedTable ? lockedTables.has(selectedTable) : false;
+
   return (
     <div class="space-y-6">
       {/* Header */}
@@ -100,8 +237,8 @@ export function SchemaExplorer() {
         <p class="text-sm text-text-secondary mt-1">Browse tables, columns, and relationships</p>
       </div>
 
-      {/* Service selector */}
-      <div class="flex items-center gap-4">
+      {/* Service selector + lock mode */}
+      <div class="flex items-center gap-4 flex-wrap">
         <select
           class="input w-64"
           value={selectedService}
@@ -114,6 +251,43 @@ export function SchemaExplorer() {
             </option>
           ))}
         </select>
+
+        {selectedService && (
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-text-muted">Schema Lock:</span>
+            <select
+              class="input text-xs py-1.5 w-28"
+              value={lockMode}
+              disabled={modeLoading}
+              onChange={(e) => handleModeChange((e.target as HTMLSelectElement).value)}
+            >
+              <option value="none">None</option>
+              <option value="auto">Auto</option>
+              <option value="strict">Strict</option>
+            </select>
+            {lockMode !== 'none' && (
+              <span class={`text-xs px-2 py-0.5 rounded-full ${
+                lockMode === 'strict'
+                  ? 'bg-error/10 text-error'
+                  : 'bg-warning/10 text-warning'
+              }`}>
+                {lockMode === 'strict' ? 'All changes blocked' : 'Breaking changes blocked'}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Drift summary */}
+        {driftReport && driftReport.has_drift && (
+          <div class={`text-xs px-2 py-0.5 rounded-full ${
+            driftReport.has_breaking ? 'bg-error/10 text-error' : 'bg-warning/10 text-warning'
+          }`}>
+            {driftReport.total_breaking > 0 && `${driftReport.total_breaking} breaking`}
+            {driftReport.total_breaking > 0 && driftReport.total_additive > 0 && ', '}
+            {driftReport.total_additive > 0 && `${driftReport.total_additive} additive`}
+            {' '}change{(driftReport.total_breaking + driftReport.total_additive) !== 1 ? 's' : ''}
+          </div>
+        )}
       </div>
 
       {/* Two-panel layout */}
@@ -165,6 +339,14 @@ export function SchemaExplorer() {
                         </svg>
                         <span class="truncate font-mono text-xs">{table.name}</span>
                       </span>
+                      <span class="flex items-center gap-1.5">
+                        {lockedTables.has(table.name) && (
+                          <svg class="w-3 h-3 shrink-0 text-text-muted" viewBox="0 0 20 20" fill="currentColor" title="Locked">
+                            <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
+                          </svg>
+                        )}
+                        {driftBadge(table.name)}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -173,8 +355,11 @@ export function SchemaExplorer() {
 
             {/* Table count */}
             {tables.length > 0 && (
-              <div class="px-4 py-2 border-t border-border-subtle text-xs text-text-muted">
-                {filteredTables.length} of {tables.length} tables
+              <div class="px-4 py-2 border-t border-border-subtle text-xs text-text-muted flex items-center justify-between">
+                <span>{filteredTables.length} of {tables.length} tables</span>
+                {lockedTables.size > 0 && (
+                  <span>{lockedTables.size} locked</span>
+                )}
               </div>
             )}
           </div>
@@ -188,7 +373,14 @@ export function SchemaExplorer() {
                 {/* Table header */}
                 <div class="px-6 py-4 border-b border-border-subtle flex items-center justify-between">
                   <div>
-                    <h2 class="text-base font-semibold text-text-primary font-mono">{selectedTable}</h2>
+                    <h2 class="text-base font-semibold text-text-primary font-mono flex items-center gap-2">
+                      {selectedTable}
+                      {isSelectedLocked && (
+                        <svg class="w-4 h-4 text-text-muted" viewBox="0 0 20 20" fill="currentColor" title="Locked">
+                          <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
+                        </svg>
+                      )}
+                    </h2>
                     <p class="text-xs text-text-muted mt-0.5">
                       {columns.length} columns
                       {columns.some((c) => c.is_primary_key) && (
@@ -197,6 +389,30 @@ export function SchemaExplorer() {
                     </p>
                   </div>
                   <div class="flex items-center gap-2">
+                    {/* Lock/Unlock button */}
+                    <button
+                      onClick={() => handleLockToggle(selectedTable)}
+                      disabled={lockLoading === selectedTable}
+                      class={`text-xs py-1.5 px-3 rounded-lg transition-colors ${
+                        isSelectedLocked
+                          ? 'bg-surface-overlay text-text-secondary hover:bg-error/10 hover:text-error'
+                          : 'bg-surface-overlay text-text-secondary hover:bg-brand/10 hover:text-brand'
+                      }`}
+                    >
+                      {lockLoading === selectedTable ? 'Loading...' : isSelectedLocked ? 'Unlock' : 'Lock'}
+                    </button>
+
+                    {/* Promote button (only when locked and has drift) */}
+                    {isSelectedLocked && selectedTableDrift?.has_drift && (
+                      <button
+                        onClick={() => handlePromote(selectedTable)}
+                        disabled={promoteLoading}
+                        class="text-xs py-1.5 px-3 rounded-lg bg-brand/10 text-brand hover:bg-brand/20 transition-colors"
+                      >
+                        {promoteLoading ? 'Promoting...' : 'Promote'}
+                      </button>
+                    )}
+
                     <a
                       href={`/api-explorer?service=${selectedService}&table=${selectedTable}`}
                       class="btn-secondary text-xs py-1.5"
@@ -205,6 +421,41 @@ export function SchemaExplorer() {
                     </a>
                   </div>
                 </div>
+
+                {/* Drift alert */}
+                {isSelectedLocked && selectedTableDrift?.has_drift && (
+                  <div class={`px-6 py-3 border-b border-border-subtle ${
+                    selectedTableDrift.has_breaking ? 'bg-error/5' : 'bg-warning/5'
+                  }`}>
+                    <div class="flex items-center gap-2 mb-2">
+                      <span class={`w-2 h-2 rounded-full ${
+                        selectedTableDrift.has_breaking ? 'bg-error' : 'bg-warning'
+                      }`} />
+                      <span class={`text-xs font-medium ${
+                        selectedTableDrift.has_breaking ? 'text-error' : 'text-warning'
+                      }`}>
+                        Schema Drift Detected
+                      </span>
+                      <span class="text-xs text-text-muted">
+                        The live database schema differs from the locked API contract.
+                      </span>
+                    </div>
+                    <div class="space-y-1">
+                      {selectedTableDrift.items?.map((item, i) => (
+                        <div key={i} class="flex items-center gap-2 text-xs">
+                          <span class={`px-1.5 py-0.5 rounded text-[10px] font-medium uppercase ${
+                            item.type === 'breaking'
+                              ? 'bg-error/10 text-error'
+                              : 'bg-warning/10 text-warning'
+                          }`}>
+                            {item.type}
+                          </span>
+                          <span class="text-text-secondary">{item.description}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Columns */}
                 {loadingColumns ? (

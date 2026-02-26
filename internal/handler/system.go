@@ -275,6 +275,9 @@ func (h *SystemHandler) CreateService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	svc.IsActive = true
+	if svc.SchemaLock == "" {
+		svc.SchemaLock = "none"
+	}
 
 	// Sanitize the DSN to ensure special characters in passwords are properly
 	// URL-encoded for URL-style DSNs (postgres://, sqlserver://).
@@ -929,6 +932,7 @@ func serviceToMap(svc *model.ServiceConfig) map[string]interface{} {
 		"read_only":       svc.ReadOnly,
 		"raw_sql_allowed": svc.RawSQL,
 		"is_active":       svc.IsActive,
+		"schema_lock":     svc.SchemaLock,
 		"created_at":      svc.CreatedAt,
 		"updated_at":      svc.UpdatedAt,
 	}

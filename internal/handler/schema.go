@@ -8,6 +8,7 @@ import (
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
+	"github.com/faucetdb/faucet/internal/contract"
 	"github.com/faucetdb/faucet/internal/model"
 )
 
@@ -27,6 +28,9 @@ func NewSchemaHandler(registry *connector.Registry, store *config.Store) *Schema
 
 // ListTables returns the full schema for a service's database, including all
 // tables, views, stored procedures, and functions.
+//
+// When schema locking is enabled (auto or strict), the response includes a
+// "contract" field with drift status for each locked table.
 // GET /api/v1/{serviceName}/_schema
 func (h *SchemaHandler) ListTables(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
@@ -40,6 +44,18 @@ func (h *SchemaHandler) ListTables(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to introspect schema: "+err.Error())
 		return
+	}
+
+	// Auto-lock: if service is in auto or strict mode and no contracts exist yet,
+	// create them on first introspection.
+	svc, _ := h.store.GetServiceByName(r.Context(), serviceName)
+	if svc != nil && (svc.SchemaLock == "auto" || svc.SchemaLock == "strict") {
+		contracts, _ := h.store.ListContracts(r.Context(), serviceName)
+		if len(contracts) == 0 && len(schema.Tables) > 0 {
+			for _, table := range schema.Tables {
+				h.store.SaveContract(r.Context(), serviceName, table.Name, table)
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, schema)
@@ -61,6 +77,19 @@ func (h *SchemaHandler) GetTableSchema(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Table not found: "+err.Error())
 		return
+	}
+
+	// If contract exists, include drift info in headers.
+	c, err := h.store.GetContract(r.Context(), serviceName, tableName)
+	if err == nil {
+		drift := contract.DiffTable(serviceName, c.Schema, *table, c.LockedAt)
+		if drift.HasBreaking {
+			w.Header().Set("X-Schema-Drift", "breaking")
+		} else if drift.HasDrift {
+			w.Header().Set("X-Schema-Drift", "additive")
+		} else {
+			w.Header().Set("X-Schema-Drift", "none")
+		}
 	}
 
 	writeJSON(w, http.StatusOK, table)
@@ -109,10 +138,13 @@ func (h *SchemaHandler) CreateTable(w http.ResponseWriter, r *http.Request) {
 	// Return the schema of the newly created table.
 	created, err := conn.IntrospectTable(r.Context(), def.Name)
 	if err != nil {
-		// Table was created but introspection failed; return success with the
-		// original definition.
 		writeJSON(w, http.StatusCreated, def)
 		return
+	}
+
+	// Auto-lock new tables when in auto or strict mode.
+	if svc != nil && (svc.SchemaLock == "auto" || svc.SchemaLock == "strict") {
+		h.store.SaveContract(r.Context(), serviceName, created.Name, *created)
 	}
 
 	writeJSON(w, http.StatusCreated, created)
@@ -121,6 +153,10 @@ func (h *SchemaHandler) CreateTable(w http.ResponseWriter, r *http.Request) {
 // AlterTable modifies an existing table's schema. The request body should
 // contain an array of schema changes (add_column, drop_column, rename_column,
 // modify_column).
+//
+// When schema locking is in "strict" mode, AlterTable is blocked entirely.
+// When in "auto" mode, only breaking changes (drop_column, rename_column,
+// modify_column) are blocked; additive changes (add_column) pass through.
 // PUT /api/v1/{serviceName}/_schema/{tableName}
 func (h *SchemaHandler) AlterTable(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
@@ -139,9 +175,7 @@ func (h *SchemaHandler) AlterTable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Accept the request body as a schema change list. We support two formats:
-	// 1. Direct array: [{"type": "add_column", ...}]
-	// 2. Envelope: {"changes": [{"type": "add_column", ...}]}
+	// Accept the request body as a schema change list.
 	var changes []connector.SchemaChange
 
 	var envelope struct {
@@ -176,6 +210,28 @@ func (h *SchemaHandler) AlterTable(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Contract locking enforcement.
+	if svc != nil && svc.SchemaLock != "" && svc.SchemaLock != "none" {
+		_, contractErr := h.store.GetContract(r.Context(), serviceName, tableName)
+		if contractErr == nil {
+			if svc.SchemaLock == "strict" {
+				writeError(w, http.StatusConflict,
+					"Schema is locked in strict mode. Run 'faucet db promote' or change mode to apply changes.")
+				return
+			}
+			// Auto mode: block breaking changes.
+			for _, ch := range changes {
+				if ch.Type == "drop_column" || ch.Type == "rename_column" || ch.Type == "modify_column" {
+					writeError(w, http.StatusConflict, fmt.Sprintf(
+						"Breaking schema change blocked: %s on column %q. Schema is locked in auto mode. "+
+							"Run 'faucet db promote %s --table %s' to accept, or unlock the table first.",
+						ch.Type, ch.Column, serviceName, tableName))
+					return
+				}
+			}
+		}
+	}
+
 	if err := conn.AlterTable(r.Context(), tableName, changes); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to alter table: "+err.Error())
 		return
@@ -191,10 +247,17 @@ func (h *SchemaHandler) AlterTable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// In auto mode, auto-promote additive changes to keep the contract in sync.
+	if svc != nil && svc.SchemaLock == "auto" {
+		h.store.PromoteContract(r.Context(), serviceName, tableName, *updated)
+	}
+
 	writeJSON(w, http.StatusOK, updated)
 }
 
 // DropTable removes a table from the service's database.
+//
+// When schema locking is enabled, dropping a locked table is blocked.
 // DELETE /api/v1/{serviceName}/_schema/{tableName}
 func (h *SchemaHandler) DropTable(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
@@ -211,6 +274,17 @@ func (h *SchemaHandler) DropTable(w http.ResponseWriter, r *http.Request) {
 	if err == nil && svc.ReadOnly {
 		writeError(w, http.StatusForbidden, "Service is read-only")
 		return
+	}
+
+	// Block dropping locked tables.
+	if svc != nil && svc.SchemaLock != "" && svc.SchemaLock != "none" {
+		_, contractErr := h.store.GetContract(r.Context(), serviceName, tableName)
+		if contractErr == nil {
+			writeError(w, http.StatusConflict, fmt.Sprintf(
+				"Cannot drop locked table %q. Run 'faucet db unlock %s --table %s' first.",
+				tableName, serviceName, tableName))
+			return
+		}
 	}
 
 	if err := conn.DropTable(r.Context(), tableName); err != nil {

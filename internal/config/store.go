@@ -77,6 +77,7 @@ type serviceRow struct {
 	ReadOnly          bool      `db:"read_only"`
 	RawSQLAllowed     bool      `db:"raw_sql_allowed"`
 	IsActive          bool      `db:"is_active"`
+	SchemaLock        string    `db:"schema_lock"`
 	MaxOpenConns      int       `db:"max_open_conns"`
 	MaxIdleConns      int       `db:"max_idle_conns"`
 	ConnMaxLifetimeMs int64     `db:"conn_max_lifetime_ms"`
@@ -86,6 +87,10 @@ type serviceRow struct {
 }
 
 func serviceRowFromModel(svc *model.ServiceConfig) serviceRow {
+	schemaLock := svc.SchemaLock
+	if schemaLock == "" {
+		schemaLock = "none"
+	}
 	return serviceRow{
 		ID:                svc.ID,
 		Name:              svc.Name,
@@ -97,6 +102,7 @@ func serviceRowFromModel(svc *model.ServiceConfig) serviceRow {
 		ReadOnly:          svc.ReadOnly,
 		RawSQLAllowed:     svc.RawSQL,
 		IsActive:          svc.IsActive,
+		SchemaLock:        schemaLock,
 		MaxOpenConns:      svc.Pool.MaxOpenConns,
 		MaxIdleConns:      svc.Pool.MaxIdleConns,
 		ConnMaxLifetimeMs: svc.Pool.ConnMaxLifetime.Milliseconds(),
@@ -118,6 +124,7 @@ func (r serviceRow) toModel() model.ServiceConfig {
 		ReadOnly:       r.ReadOnly,
 		RawSQL:         r.RawSQLAllowed,
 		IsActive:       r.IsActive,
+		SchemaLock:     r.SchemaLock,
 		Pool: model.PoolConfig{
 			MaxOpenConns:    r.MaxOpenConns,
 			MaxIdleConns:    r.MaxIdleConns,
@@ -139,11 +146,11 @@ func (s *Store) CreateService(ctx context.Context, svc *model.ServiceConfig) err
 	row := serviceRowFromModel(svc)
 
 	const q = `INSERT INTO services
-		(name, label, driver, dsn, private_key_path, schema_name, read_only, raw_sql_allowed, is_active,
+		(name, label, driver, dsn, private_key_path, schema_name, read_only, raw_sql_allowed, is_active, schema_lock,
 		 max_open_conns, max_idle_conns, conn_max_lifetime_ms, conn_max_idle_time_ms,
 		 created_at, updated_at)
 		VALUES
-		(:name, :label, :driver, :dsn, :private_key_path, :schema_name, :read_only, :raw_sql_allowed, :is_active,
+		(:name, :label, :driver, :dsn, :private_key_path, :schema_name, :read_only, :raw_sql_allowed, :is_active, :schema_lock,
 		 :max_open_conns, :max_idle_conns, :conn_max_lifetime_ms, :conn_max_idle_time_ms,
 		 :created_at, :updated_at)`
 
@@ -209,9 +216,9 @@ func (s *Store) UpdateService(ctx context.Context, svc *model.ServiceConfig) err
 	const q = `UPDATE services SET
 		name = :name, label = :label, driver = :driver, dsn = :dsn, private_key_path = :private_key_path,
 		schema_name = :schema_name, read_only = :read_only, raw_sql_allowed = :raw_sql_allowed,
-		is_active = :is_active, max_open_conns = :max_open_conns, max_idle_conns = :max_idle_conns,
-		conn_max_lifetime_ms = :conn_max_lifetime_ms, conn_max_idle_time_ms = :conn_max_idle_time_ms,
-		updated_at = :updated_at
+		is_active = :is_active, schema_lock = :schema_lock, max_open_conns = :max_open_conns,
+		max_idle_conns = :max_idle_conns, conn_max_lifetime_ms = :conn_max_lifetime_ms,
+		conn_max_idle_time_ms = :conn_max_idle_time_ms, updated_at = :updated_at
 		WHERE id = :id`
 
 	result, err := s.db.NamedExecContext(ctx, q, row)

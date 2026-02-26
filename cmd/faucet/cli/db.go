@@ -25,6 +25,10 @@ func newDBCmd() *cobra.Command {
 	cmd.AddCommand(newDBRemoveCmd())
 	cmd.AddCommand(newDBTestCmd())
 	cmd.AddCommand(newDBSchemaCmd())
+	cmd.AddCommand(newDBLockCmd())
+	cmd.AddCommand(newDBUnlockCmd())
+	cmd.AddCommand(newDBDiffCmd())
+	cmd.AddCommand(newDBPromoteCmd())
 
 	return cmd
 }

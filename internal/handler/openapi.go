@@ -57,6 +57,12 @@ func (h *OpenAPIHandler) ServeCombinedSpec(w http.ResponseWriter, r *http.Reques
 			continue // skip services that fail introspection
 		}
 
+		// When schema locking is enabled, use the locked contract shapes for
+		// the OpenAPI spec to guarantee API stability.
+		if svc.SchemaLock == "auto" || svc.SchemaLock == "strict" {
+			schema = h.applyContracts(r, svc.Name, schema)
+		}
+
 		tags = append(tags, map[string]interface{}{
 			"name":        svc.Name,
 			"description": fmt.Sprintf("Database service: %s (%s)", svc.Label, svc.Driver),
@@ -127,6 +133,11 @@ func (h *OpenAPIHandler) ServeServiceSpec(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to introspect schema: "+err.Error())
 		return
+	}
+
+	// Apply locked contracts to stabilize the OpenAPI spec.
+	if svc != nil && (svc.SchemaLock == "auto" || svc.SchemaLock == "strict") {
+		schema = h.applyContracts(r, serviceName, schema)
 	}
 
 	paths, schemas := buildServiceSpec(serviceName, schema)
@@ -555,4 +566,35 @@ func jsonSchemaType(jsonType string) string {
 	default:
 		return "string"
 	}
+}
+
+// applyContracts replaces the column definitions in the live schema with locked
+// contract definitions where they exist. This ensures the OpenAPI spec reflects
+// the stable API contract rather than the potentially-drifted live schema.
+func (h *OpenAPIHandler) applyContracts(r *http.Request, serviceName string, schema *model.Schema) *model.Schema {
+	contracts, err := h.store.ListContracts(r.Context(), serviceName)
+	if err != nil || len(contracts) == 0 {
+		return schema
+	}
+
+	// Build a lookup map of locked table schemas.
+	lockedTables := make(map[string]model.TableSchema, len(contracts))
+	for _, c := range contracts {
+		lockedTables[c.TableName] = c.Schema
+	}
+
+	// Replace table column definitions with locked versions.
+	result := &model.Schema{
+		Views:      schema.Views,
+		Procedures: schema.Procedures,
+		Functions:  schema.Functions,
+	}
+	for _, table := range schema.Tables {
+		if locked, ok := lockedTables[table.Name]; ok {
+			result.Tables = append(result.Tables, locked)
+		} else {
+			result.Tables = append(result.Tables, table)
+		}
+	}
+	return result
 }

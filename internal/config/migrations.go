@@ -80,6 +80,20 @@ func (s *Store) migrate() error {
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL DEFAULT ''
 		)`,
+
+		// v4: Schema contract locking — snapshots of locked table schemas.
+		`CREATE TABLE IF NOT EXISTS schema_contracts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			service_name TEXT NOT NULL,
+			table_name TEXT NOT NULL,
+			schema_json TEXT NOT NULL,
+			locked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			promoted_at DATETIME,
+			UNIQUE(service_name, table_name)
+		)`,
+
+		// v5: Schema lock mode per service (none, auto, strict).
+		`ALTER TABLE services ADD COLUMN schema_lock TEXT NOT NULL DEFAULT 'none'`,
 	}
 
 	for _, m := range migrations {

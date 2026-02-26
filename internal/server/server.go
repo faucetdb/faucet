@@ -152,6 +152,20 @@ func (s *Server) setupRouter() {
 
 				// MCP configuration info
 				r.Get("/mcp", sysHandler.MCPInfo)
+
+				// Schema contract locking
+				contractHandler := handler.NewContractHandler(s.registry, s.store)
+				r.Route("/contract", func(r chi.Router) {
+					r.Post("/{serviceName}", contractHandler.LockService)
+					r.Get("/{serviceName}", contractHandler.ListContracts)
+					r.Delete("/{serviceName}", contractHandler.UnlockService)
+					r.Get("/{serviceName}/diff", contractHandler.DiffService)
+					r.Put("/{serviceName}/mode", contractHandler.SetLockMode)
+					r.Post("/{serviceName}/{tableName}", contractHandler.LockTable)
+					r.Get("/{serviceName}/{tableName}", contractHandler.GetContract)
+					r.Delete("/{serviceName}/{tableName}", contractHandler.UnlockTable)
+					r.Post("/{serviceName}/{tableName}/promote", contractHandler.PromoteTable)
+				})
 			})
 		})
 

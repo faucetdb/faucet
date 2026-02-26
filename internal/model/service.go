@@ -12,9 +12,10 @@ type ServiceConfig struct {
 	DSN            string `json:"dsn,omitempty" db:"dsn"` // Accepted on input; omitted in list responses via serviceToMap
 	PrivateKeyPath string `json:"private_key_path,omitempty" db:"private_key_path"`
 	Schema         string `json:"schema" db:"schema_name"`
-	ReadOnly  bool       `json:"read_only" db:"read_only"`
-	RawSQL    bool       `json:"raw_sql_allowed" db:"raw_sql_allowed"`
-	IsActive  bool       `json:"is_active" db:"is_active"`
+	ReadOnly   bool   `json:"read_only" db:"read_only"`
+	RawSQL     bool   `json:"raw_sql_allowed" db:"raw_sql_allowed"`
+	IsActive   bool   `json:"is_active" db:"is_active"`
+	SchemaLock string `json:"schema_lock" db:"schema_lock"`
 	Pool      PoolConfig `json:"pool"`
 	CreatedAt time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
