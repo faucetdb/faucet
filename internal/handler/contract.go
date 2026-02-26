@@ -293,7 +293,7 @@ func (h *ContractHandler) SetLockMode(w http.ResponseWriter, r *http.Request) {
 				schema, err := conn.IntrospectSchema(r.Context())
 				if err == nil {
 					for _, table := range schema.Tables {
-						h.store.SaveContract(r.Context(), serviceName, table.Name, table)
+						_, _ = h.store.SaveContract(r.Context(), serviceName, table.Name, table)
 					}
 				}
 			}

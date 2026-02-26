@@ -53,7 +53,7 @@ func (h *SchemaHandler) ListTables(w http.ResponseWriter, r *http.Request) {
 		contracts, _ := h.store.ListContracts(r.Context(), serviceName)
 		if len(contracts) == 0 && len(schema.Tables) > 0 {
 			for _, table := range schema.Tables {
-				h.store.SaveContract(r.Context(), serviceName, table.Name, table)
+				_, _ = h.store.SaveContract(r.Context(), serviceName, table.Name, table)
 			}
 		}
 	}
@@ -144,7 +144,7 @@ func (h *SchemaHandler) CreateTable(w http.ResponseWriter, r *http.Request) {
 
 	// Auto-lock new tables when in auto or strict mode.
 	if svc != nil && (svc.SchemaLock == "auto" || svc.SchemaLock == "strict") {
-		h.store.SaveContract(r.Context(), serviceName, created.Name, *created)
+		_, _ = h.store.SaveContract(r.Context(), serviceName, created.Name, *created)
 	}
 
 	writeJSON(w, http.StatusCreated, created)
@@ -249,7 +249,7 @@ func (h *SchemaHandler) AlterTable(w http.ResponseWriter, r *http.Request) {
 
 	// In auto mode, auto-promote additive changes to keep the contract in sync.
 	if svc != nil && svc.SchemaLock == "auto" {
-		h.store.PromoteContract(r.Context(), serviceName, tableName, *updated)
+		_ = h.store.PromoteContract(r.Context(), serviceName, tableName, *updated)
 	}
 
 	writeJSON(w, http.StatusOK, updated)
