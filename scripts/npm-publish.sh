@@ -20,8 +20,9 @@ DIST_DIR="$ROOT_DIR/dist"
 
 echo "=== Publishing Faucet npm packages v${NPM_VERSION} ==="
 
-# Configure npm auth
+# Configure npm auth (trap ensures cleanup on any exit)
 echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+trap 'rm -f ~/.npmrc' EXIT
 
 # Map GoReleaser archive names to npm package dirs
 # GoReleaser names: faucet_{version}_{os}_{arch}.tar.gz (or .zip for windows)
@@ -89,6 +90,7 @@ node -e "
 "
 
 # Publish platform packages first
+PUBLISHED_COUNT=0
 for npm_pkg in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
   pkg_dir="$NPM_DIR/$npm_pkg"
   if [[ ! -d "$pkg_dir/bin" ]] || [[ -z "$(ls -A "$pkg_dir/bin/" 2>/dev/null)" ]]; then
@@ -99,7 +101,13 @@ for npm_pkg in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm
   cd "$pkg_dir"
   npm publish --access public
   cd "$ROOT_DIR"
+  PUBLISHED_COUNT=$((PUBLISHED_COUNT + 1))
 done
+
+if [[ "$PUBLISHED_COUNT" -eq 0 ]]; then
+  echo "ERROR: No platform packages were published. Aborting."
+  exit 1
+fi
 
 # Publish main package last (depends on platform packages)
 echo "Publishing @faucetdb/faucet@${NPM_VERSION}"

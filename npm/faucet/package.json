@@ -8,6 +8,12 @@
     "url": "https://github.com/faucetdb/faucet.git"
   },
   "homepage": "https://faucetdb.ai",
+  "bugs": {
+    "url": "https://github.com/faucetdb/faucet/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "keywords": [
     "database",
     "rest-api",

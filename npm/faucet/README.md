@@ -17,7 +17,7 @@ faucet serve
 
 ## What is Faucet?
 
-Faucet connects to your SQL databases, introspects their schemas, and auto-generates a full CRUD REST API with authentication, RBAC, OpenAPI docs, and an MCP server for AI agents — all in a single ~22MB binary.
+Faucet connects to your SQL databases, introspects their schemas, and auto-generates a full CRUD REST API with authentication, RBAC, OpenAPI docs, and an MCP server for AI agents — all in a single binary.
 
 **Supported databases:** PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, Snowflake, SQLite.
 

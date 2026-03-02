@@ -60,6 +60,10 @@ npm/darwin-arm64/bin/
 npm/win32-x64/bin/
 npm/win32-arm64/bin/
 
+# npm JS shim must be tracked (un-ignore from top-level bin/ rule)
+!npm/faucet/bin/
+!npm/faucet/bin/faucet
+
 # Docs (separate repo: faucetdb/wiki)
 docs/
 docs-site/

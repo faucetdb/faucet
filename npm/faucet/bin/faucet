@@ -1,0 +1,66 @@
+#!/usr/bin/env node
+
+"use strict";
+
+const { execFileSync } = require("child_process");
+const path = require("path");
+const os = require("os");
+
+// Map Node.js platform/arch to our package names
+const PLATFORMS = {
+  "darwin-x64": "@faucetdb/darwin-x64",
+  "darwin-arm64": "@faucetdb/darwin-arm64",
+  "linux-x64": "@faucetdb/linux-x64",
+  "linux-arm64": "@faucetdb/linux-arm64",
+  "win32-x64": "@faucetdb/win32-x64",
+  "win32-arm64": "@faucetdb/win32-arm64",
+};
+
+function getBinaryPath() {
+  const platform = os.platform();
+  const arch = os.arch();
+  const key = `${platform}-${arch}`;
+  const pkg = PLATFORMS[key];
+
+  if (!pkg) {
+    console.error(
+      `Unsupported platform: ${platform}-${arch}\n` +
+      `Faucet supports: ${Object.keys(PLATFORMS).join(", ")}\n` +
+      `Install from source instead: go install github.com/faucetdb/faucet/cmd/faucet@latest`
+    );
+    process.exit(1);
+  }
+
+  const binary = platform === "win32" ? "faucet.exe" : "faucet";
+
+  try {
+    return require.resolve(`${pkg}/bin/${binary}`);
+  } catch (e) {
+    console.error(
+      `Could not find the Faucet binary for ${platform}-${arch}.\n` +
+      `The platform package ${pkg} may not have been installed correctly.\n\n` +
+      `Try reinstalling:\n` +
+      `  npm install @faucetdb/faucet\n\n` +
+      `Or install directly:\n` +
+      `  brew install faucetdb/tap/faucet\n` +
+      `  go install github.com/faucetdb/faucet/cmd/faucet@latest`
+    );
+    process.exit(1);
+  }
+}
+
+const binary = getBinaryPath();
+
+try {
+  execFileSync(binary, process.argv.slice(2), { stdio: "inherit" });
+} catch (e) {
+  if (e.status !== null) {
+    process.exit(e.status);
+  }
+  if (e.signal) {
+    // Re-raise the signal so the parent gets the correct 128+N exit code
+    process.kill(process.pid, e.signal);
+    return;
+  }
+  throw e;
+}
