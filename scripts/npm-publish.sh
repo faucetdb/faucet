@@ -2,15 +2,15 @@
 set -euo pipefail
 
 # Publish Faucet npm packages for a given release version.
-# Usage: ./scripts/npm-publish.sh v0.1.7
+# Usage: ./scripts/npm-publish.sh v0.1.8
 #
 # Expects:
-#   - GoReleaser has already run and produced dist/ with archives
+#   - GoReleaser archives in dist/ OR will download from GitHub release
 #   - NPM_TOKEN environment variable is set
 #   - npm is available
 
 VERSION="${1:?Usage: npm-publish.sh <version>}"
-# Strip leading 'v' for npm (v0.1.7 -> 0.1.7)
+# Strip leading 'v' for npm (v0.1.8 -> 0.1.8)
 NPM_VERSION="${VERSION#v}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -20,24 +20,34 @@ DIST_DIR="$ROOT_DIR/dist"
 
 echo "=== Publishing Faucet npm packages v${NPM_VERSION} ==="
 
+# If dist/ doesn't have the archives, download from GitHub release
+SAMPLE_ARCHIVE="$DIST_DIR/faucet_${NPM_VERSION}_linux_amd64.tar.gz"
+if [[ ! -f "$SAMPLE_ARCHIVE" ]]; then
+  echo "Archives not found in dist/, downloading from GitHub release..."
+  mkdir -p "$DIST_DIR"
+  gh release download "$VERSION" --dir "$DIST_DIR" --pattern '*.tar.gz' --pattern '*.zip' --clobber
+fi
+
 # Configure npm auth (trap ensures cleanup on any exit)
 echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
 trap 'rm -f ~/.npmrc' EXIT
 
-# Map GoReleaser archive names to npm package dirs
-# GoReleaser names: faucet_{version}_{os}_{arch}.tar.gz (or .zip for windows)
-declare -A PLATFORM_MAP=(
-  ["linux_amd64"]="linux-x64"
-  ["linux_arm64"]="linux-arm64"
-  ["darwin_amd64"]="darwin-x64"
-  ["darwin_arm64"]="darwin-arm64"
-  ["windows_amd64"]="win32-x64"
-  ["windows_arm64"]="win32-arm64"
-)
+# Platform mappings (bash 3 compatible — no associative arrays)
+GORELEASER_KEYS="linux_amd64 linux_arm64 darwin_amd64 darwin_arm64 windows_amd64 windows_arm64"
+npm_pkg_for() {
+  case "$1" in
+    linux_amd64)   echo "linux-x64" ;;
+    linux_arm64)   echo "linux-arm64" ;;
+    darwin_amd64)  echo "darwin-x64" ;;
+    darwin_arm64)  echo "darwin-arm64" ;;
+    windows_amd64) echo "win32-x64" ;;
+    windows_arm64) echo "win32-arm64" ;;
+  esac
+}
 
 # Extract binaries from GoReleaser archives into npm package dirs
-for goreleaser_key in "${!PLATFORM_MAP[@]}"; do
-  npm_pkg="${PLATFORM_MAP[$goreleaser_key]}"
+for goreleaser_key in $GORELEASER_KEYS; do
+  npm_pkg="$(npm_pkg_for "$goreleaser_key")"
   pkg_dir="$NPM_DIR/$npm_pkg"
 
   mkdir -p "$pkg_dir/bin"
@@ -67,7 +77,6 @@ for goreleaser_key in "${!PLATFORM_MAP[@]}"; do
   chmod +x "$pkg_dir/bin/$binary"
 
   echo "Setting version $NPM_VERSION in $pkg_dir/package.json"
-  # Use node to update version (portable across platforms)
   node -e "
     const fs = require('fs');
     const pkg = JSON.parse(fs.readFileSync('$pkg_dir/package.json', 'utf8'));
@@ -119,9 +128,6 @@ cd "$ROOT_DIR"
 for npm_pkg in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
   rm -rf "$NPM_DIR/$npm_pkg/bin"
 done
-
-# Clean up npmrc
-rm -f ~/.npmrc
 
 echo "=== Done! Published @faucetdb/faucet@${NPM_VERSION} ==="
 echo "Install: npx @faucetdb/faucet --help"
