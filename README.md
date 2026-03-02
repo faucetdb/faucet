@@ -126,7 +126,7 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 | **MySQL** | 5.7 – 9.x | Amazon RDS, Aurora MySQL, PlanetScale, Azure MySQL |
 | **MariaDB** | 10.2 – 11.x | Via MySQL driver |
 | **SQL Server** | 2008 – 2022 | Azure SQL Database, Amazon RDS |
-| **Oracle** | 12c – 23ai | Oracle Cloud (OCI), Amazon RDS, Azure |
+| **Oracle** | 12c – 26ai | Oracle Cloud (OCI), Amazon RDS, Azure |
 | **Snowflake** | Current | AWS, Azure, GCP |
 | **SQLite** | 3.35+ | Local file, in-memory |
 
