@@ -51,7 +51,7 @@ func newDBAddCmd() *cobra.Command {
 		Long: `Add a new database service connection. Provide flags for non-interactive use,
 or omit them to be prompted interactively.
 
-Supported drivers: postgres, mysql, mssql, snowflake, sqlite`,
+Supported drivers: postgres, mysql, mssql, oracle, snowflake, sqlite`,
 		Example: `  faucet db add --name mydb --driver postgres --dsn "postgres://user:pass@localhost/mydb"
   faucet db add --name analytics --driver snowflake --dsn "USER@org-account/DB/SCHEMA" --private-key-path /path/to/key.p8
   faucet db add  # interactive mode`,
@@ -61,7 +61,7 @@ Supported drivers: postgres, mysql, mssql, snowflake, sqlite`,
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", "Service name (unique identifier)")
-	cmd.Flags().StringVar(&driver, "driver", "", "Database driver (postgres, mysql, mssql, snowflake, sqlite)")
+	cmd.Flags().StringVar(&driver, "driver", "", "Database driver (postgres, mysql, mssql, oracle, snowflake, sqlite)")
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Data source name / connection string")
 	cmd.Flags().StringVar(&label, "label", "", "Human-readable label (defaults to name)")
 	cmd.Flags().StringVar(&schema, "schema", "", "Database schema to expose (default depends on driver)")
@@ -77,7 +77,7 @@ func runDBAdd(name, driver, dsn, label, schema, privateKeyPath string) error {
 		fmt.Scanln(&name)
 	}
 	if driver == "" {
-		fmt.Print("Driver (postgres, mysql, mssql, snowflake, sqlite): ")
+		fmt.Print("Driver (postgres, mysql, mssql, oracle, snowflake, sqlite): ")
 		fmt.Scanln(&driver)
 	}
 	if dsn == "" {
@@ -94,10 +94,10 @@ func runDBAdd(name, driver, dsn, label, schema, privateKeyPath string) error {
 	}
 
 	supportedDrivers := map[string]bool{
-		"postgres": true, "mysql": true, "mssql": true, "snowflake": true, "sqlite": true,
+		"postgres": true, "mysql": true, "mssql": true, "oracle": true, "snowflake": true, "sqlite": true,
 	}
 	if !supportedDrivers[driver] {
-		return fmt.Errorf("unsupported driver %q; supported: postgres, mysql, mssql, snowflake, sqlite", driver)
+		return fmt.Errorf("unsupported driver %q; supported: postgres, mysql, mssql, oracle, snowflake, sqlite", driver)
 	}
 
 	store, err := openConfigStore()

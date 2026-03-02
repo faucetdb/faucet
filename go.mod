@@ -14,6 +14,7 @@ require (
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/mark3labs/mcp-go v0.44.0
 	github.com/microsoft/go-mssqldb v1.9.6
+	github.com/sijms/go-ora/v2 v2.9.0
 	github.com/snowflakedb/gosnowflake v1.19.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0

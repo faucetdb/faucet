@@ -40,7 +40,7 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 - **AI agent data access** — Give Claude, GPT, or any MCP-compatible agent governed, read/write access to your databases.
 - **Internal tools & dashboards** — Generate APIs for internal databases without modifying existing infrastructure.
 - **Legacy database modernization** — Put a REST API in front of SQL Server 2008, MySQL 5.7, or PostgreSQL 9.6 without code changes.
-- **Multi-database aggregation** — Connect PostgreSQL, MySQL, and SQL Server to a single Faucet instance and query them all through one API.
+- **Multi-database aggregation** — Connect PostgreSQL, MySQL, SQL Server, Oracle, and more to a single Faucet instance and query them all through one API.
 - **Rapid prototyping** — Go from empty database to working API in under 60 seconds.
 
 ---
@@ -48,15 +48,15 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 ## How It Works
 
 ```
-┌─────────────┐       ┌───────────────────────────────────────┐       ┌──────────────┐
+┌──────────────┐       ┌───────────────────────────────────────┐       ┌──────────────┐
 │ PostgreSQL   │       │              F A U C E T              │       │   REST API   │
 │ MySQL        │──────▶│                                       │──────▶│   /api/v1/*  │
 │ MariaDB      │  SQL  │  ┌─────────┐ ┌──────┐ ┌───────────┐  │       ├──────────────┤
 │ SQL Server   │◀──────│  │ Schema  │ │ RBAC │ │  OpenAPI   │  │──────▶│  OpenAPI 3.1 │
-│ Snowflake    │       │  │ Intro-  │ │ Auth │ │ Generator  │  │       │  /openapi.json│
-│ SQLite       │       │  │ spection│ │      │ │            │  │       ├──────────────┤
-└─────────────┘       │  └─────────┘ └──────┘ └───────────┘  │──────▶│  MCP Server  │
-                       │                                       │       │  (AI Agents) │
+│ Oracle       │       │  │ Intro-  │ │ Auth │ │ Generator  │  │       │  /openapi.json│
+│ Snowflake    │       │  │ spection│ │      │ │            │  │       ├──────────────┤
+│ SQLite       │       │  └─────────┘ └──────┘ └───────────┘  │──────▶│  MCP Server  │
+└──────────────┘       │                                       │       │  (AI Agents) │
                        │  ┌──────────────────────────────────┐ │       ├──────────────┤
                        │  │   Embedded Admin UI (Preact)     │ │──────▶│   Admin UI   │
                        │  └──────────────────────────────────┘ │       │  :8080/admin │
@@ -93,7 +93,7 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 - **Schema introspection** — Discovers tables, columns, types, and constraints at runtime
 - **Schema DDL** — Create, alter, and drop tables via API
 - **Stored procedure calls** — Execute stored procedures with typed parameters
-- **DreamFactory-compatible filters** — `(age > 21) AND (status = 'active')`
+- **Human-readable query filters** — `(age > 21) AND (status = 'active')`
 - **OpenAPI 3.1 spec** — Auto-generated from live database schema at `/openapi.json`
 
 ### Security & Access Control
@@ -126,6 +126,7 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 | **MySQL** | 5.7 – 9.x | Amazon RDS, Aurora MySQL, PlanetScale, Azure MySQL |
 | **MariaDB** | 10.2 – 11.x | Via MySQL driver |
 | **SQL Server** | 2008 – 2022 | Azure SQL Database, Amazon RDS |
+| **Oracle** | 12c – 23ai | Oracle Cloud (OCI), Amazon RDS, Azure |
 | **Snowflake** | Current | AWS, Azure, GCP |
 | **SQLite** | 3.35+ | Local file, in-memory |
 
@@ -268,7 +269,7 @@ POST   /api/v1/{service}/_proc/{proc}            # Call procedure
 
 | Parameter | Example | Description |
 |-----------|---------|-------------|
-| `filter`  | `(age > 21) AND (name LIKE 'A%')` | DreamFactory-compatible filter syntax |
+| `filter`  | `(age > 21) AND (name LIKE 'A%')` | SQL-style filter syntax with safe parameterization |
 | `order`   | `created_at DESC, name ASC` | Sort order |
 | `limit`   | `25` | Max records to return |
 | `offset`  | `50` | Skip N records for pagination |
@@ -281,7 +282,7 @@ POST   /api/v1/{service}/_proc/{proc}            # Call procedure
 ## FAQ
 
 **How is Faucet different from PostgREST?**
-PostgREST only supports PostgreSQL. Faucet supports 6 databases (PostgreSQL, MySQL, MariaDB, SQL Server, Snowflake, SQLite), includes a built-in admin UI, and provides native MCP support for AI agents — all in a single binary.
+PostgREST only supports PostgreSQL. Faucet supports 7 databases (PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, Snowflake, SQLite), includes a built-in admin UI, and provides native MCP support for AI agents — all in a single binary.
 
 **How is Faucet different from Hasura?**
 Hasura requires Docker, a PostgreSQL metadata database, and is primarily GraphQL-focused. Faucet is a single binary with no dependencies, generates REST APIs (not GraphQL), and includes built-in MCP server support for AI agent integration.

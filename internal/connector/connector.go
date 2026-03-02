@@ -125,7 +125,7 @@ type Connector interface {
 // Snowflake uses its own non-URL DSN format and is returned unchanged.
 func SanitizeDSN(driver, dsn string) string {
 	switch driver {
-	case "postgres", "mssql":
+	case "postgres", "mssql", "oracle":
 		return sanitizeURLDSN(dsn)
 	case "mysql":
 		return sanitizeMySQLDSN(dsn)

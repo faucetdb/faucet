@@ -212,7 +212,7 @@ func runServe(host string, port int, noUI, dev bool) error {
 
 	// 2. Initialize connector registry and register drivers
 	registry := newRegistry()
-	logger.Info("connector registry initialized", "drivers", []string{"postgres", "mysql", "mssql", "snowflake", "sqlite"})
+	logger.Info("connector registry initialized", "drivers", []string{"postgres", "mysql", "mssql", "oracle", "snowflake", "sqlite"})
 
 	// 3. Load services from config and connect them
 	services, err := store.ListServices(cmd_ctx())
