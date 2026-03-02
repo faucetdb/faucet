@@ -1,0 +1,13 @@
+{
+  "name": "@faucetdb/darwin-arm64",
+  "version": "0.0.0",
+  "description": "Faucet binary for macOS arm64 (Apple Silicon)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/faucetdb/faucet.git"
+  },
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["bin/faucet"]
+}

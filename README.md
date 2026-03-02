@@ -113,7 +113,7 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 - **Single binary** — Zero external dependencies, ~22MB, cross-platform (Linux, macOS, Windows)
 - **Embedded admin UI** — Preact + Tailwind dashboard with setup wizard, schema explorer, API tester
 - **SQLite config store** — All configuration stored locally, no external database required
-- **Homebrew + Docker** — Install in seconds on any platform
+- **npm + Homebrew + Docker** — Install in seconds on any platform (`npx @faucetdb/faucet`)
 - **Health endpoints** — `/healthz` and `/readyz` for Kubernetes-style probes
 
 ---
@@ -135,6 +135,11 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 ## 60-Second Quickstart
 
 ### Install
+
+**npm (Node.js 18+):**
+```bash
+npx @faucetdb/faucet serve
+```
 
 **Homebrew (macOS / Linux):**
 ```bash

@@ -52,6 +52,14 @@ tmp/
 *.tmp
 *.log
 
+# npm platform package binaries (extracted during publish, never committed)
+npm/linux-x64/bin/
+npm/linux-arm64/bin/
+npm/darwin-x64/bin/
+npm/darwin-arm64/bin/
+npm/win32-x64/bin/
+npm/win32-arm64/bin/
+
 # Docs (separate repo: faucetdb/wiki)
 docs/
 docs-site/

@@ -1,0 +1,13 @@
+{
+  "name": "@faucetdb/win32-x64",
+  "version": "0.0.0",
+  "description": "Faucet binary for Windows x64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/faucetdb/faucet.git"
+  },
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "files": ["bin/faucet.exe"]
+}

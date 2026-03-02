@@ -1,0 +1,37 @@
+{
+  "name": "@faucetdb/faucet",
+  "version": "0.0.0",
+  "description": "Turn any SQL database into a secure REST API + MCP server. One binary. One command.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/faucetdb/faucet.git"
+  },
+  "homepage": "https://faucetdb.ai",
+  "keywords": [
+    "database",
+    "rest-api",
+    "mcp",
+    "postgresql",
+    "mysql",
+    "sql-server",
+    "oracle",
+    "snowflake",
+    "sqlite",
+    "api-generator",
+    "openapi",
+    "rbac"
+  ],
+  "bin": {
+    "faucet": "bin/faucet"
+  },
+  "files": ["bin/faucet"],
+  "optionalDependencies": {
+    "@faucetdb/linux-x64": "0.0.0",
+    "@faucetdb/linux-arm64": "0.0.0",
+    "@faucetdb/darwin-x64": "0.0.0",
+    "@faucetdb/darwin-arm64": "0.0.0",
+    "@faucetdb/win32-x64": "0.0.0",
+    "@faucetdb/win32-arm64": "0.0.0"
+  }
+}

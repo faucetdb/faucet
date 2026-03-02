@@ -60,3 +60,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+
+      - name: Publish npm packages
+        run: ./scripts/npm-publish.sh "${{ github.ref_name }}"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
