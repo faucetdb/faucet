@@ -79,5 +79,6 @@ jobs:
       - name: Publish npm packages
         run: ./scripts/npm-publish.sh "${{ github.ref_name }}"
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

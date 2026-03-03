@@ -28,9 +28,13 @@ if [[ ! -f "$SAMPLE_ARCHIVE" ]]; then
   gh release download "$VERSION" --dir "$DIST_DIR" --pattern '*.tar.gz' --pattern '*.zip' --clobber
 fi
 
-# Configure npm auth (trap ensures cleanup on any exit)
-echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-trap 'rm -f ~/.npmrc' EXIT
+# Configure npm auth.
+# In CI, setup-node with registry-url creates .npmrc at NPM_CONFIG_USERCONFIG
+# and uses NODE_AUTH_TOKEN. Only write our own .npmrc for local usage.
+if [[ -z "${NPM_CONFIG_USERCONFIG:-}" ]]; then
+  echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+  trap 'rm -f ~/.npmrc' EXIT
+fi
 
 # Platform mappings (bash 3 compatible — no associative arrays)
 GORELEASER_KEYS="linux_amd64 linux_arm64 darwin_amd64 darwin_arm64 windows_amd64 windows_arm64"
@@ -130,4 +134,4 @@ for npm_pkg in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm
 done
 
 echo "=== Done! Published @faucetdb/faucet@${NPM_VERSION} ==="
-echo "Install: npx @faucetdb/faucet --help"
+echo "Install: npx @faucetdb/faucet@${NPM_VERSION} --help"
