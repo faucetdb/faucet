@@ -450,12 +450,13 @@ func (s *MCPServer) handleQuery(
 
 	// Build and execute the query.
 	selectReq := connector.SelectRequest{
-		Table:  tableName,
-		Fields: fields,
-		Filter: filterSQL,
-		Order:  orderSQL,
-		Limit:  limit,
-		Offset: offset,
+		Table:      tableName,
+		Fields:     fields,
+		Filter:     filterSQL,
+		FilterArgs: filterParams,
+		Order:      orderSQL,
+		Limit:      limit,
+		Offset:     offset,
 	}
 
 	sqlStr, args, err := conn.BuildSelect(ctx, selectReq)
@@ -464,9 +465,8 @@ func (s *MCPServer) handleQuery(
 		return toolError("Failed to build query: %v\n\nAvailable tables: %v", err, names)
 	}
 
-	allArgs := append(filterParams, args...)
 	db := conn.DB()
-	rows, err := db.QueryxContext(ctx, sqlStr, allArgs...)
+	rows, err := db.QueryxContext(ctx, sqlStr, args...)
 	if err != nil {
 		return toolError("Query execution failed: %v", err)
 	}
@@ -617,11 +617,13 @@ func (s *MCPServer) handleUpdate(
 			serviceName, s.registry.ListServices())
 	}
 
-	// Parse filter.
+	// Parse filter with startIndex offset past the SET columns so that
+	// indexed placeholders ($N, @pN) don't collide with SET placeholders.
+	numSetCols := len(record)
 	phFunc := func(index int) string {
 		return conn.ParameterPlaceholder(index)
 	}
-	parsed, err := query.ParseFilter(filterStr, phFunc, 1)
+	parsed, err := query.ParseFilter(filterStr, phFunc, numSetCols+1)
 	if err != nil {
 		return toolError("Invalid filter expression: %v", err)
 	}
@@ -634,9 +636,10 @@ func (s *MCPServer) handleUpdate(
 	}
 
 	updateReq := connector.UpdateRequest{
-		Table:  tableName,
-		Record: record,
-		Filter: filterSQL,
+		Table:      tableName,
+		Record:     record,
+		Filter:     filterSQL,
+		FilterArgs: filterParams,
 	}
 
 	sqlStr, args, err := conn.BuildUpdate(ctx, updateReq)
@@ -644,11 +647,10 @@ func (s *MCPServer) handleUpdate(
 		return toolError("Failed to build update: %v", err)
 	}
 
-	allArgs := append(filterParams, args...)
 	db := conn.DB()
 
 	if conn.SupportsReturning() {
-		rows, err := db.QueryxContext(ctx, sqlStr, allArgs...)
+		rows, err := db.QueryxContext(ctx, sqlStr, args...)
 		if err != nil {
 			return toolError("Update failed: %v", err)
 		}
@@ -673,7 +675,7 @@ func (s *MCPServer) handleUpdate(
 		})
 	}
 
-	result, err := db.ExecContext(ctx, sqlStr, allArgs...)
+	result, err := db.ExecContext(ctx, sqlStr, args...)
 	if err != nil {
 		return toolError("Update failed: %v", err)
 	}
@@ -733,8 +735,9 @@ func (s *MCPServer) handleDelete(
 	}
 
 	deleteReq := connector.DeleteRequest{
-		Table:  tableName,
-		Filter: filterSQL,
+		Table:      tableName,
+		Filter:     filterSQL,
+		FilterArgs: filterParams,
 	}
 
 	sqlStr, args, err := conn.BuildDelete(ctx, deleteReq)
@@ -742,10 +745,9 @@ func (s *MCPServer) handleDelete(
 		return toolError("Failed to build delete: %v", err)
 	}
 
-	allArgs := append(filterParams, args...)
 	db := conn.DB()
 
-	result, err := db.ExecContext(ctx, sqlStr, allArgs...)
+	result, err := db.ExecContext(ctx, sqlStr, args...)
 	if err != nil {
 		return toolError("Delete failed: %v", err)
 	}

@@ -135,12 +135,13 @@ func (h *TableHandler) QueryRecords(w http.ResponseWriter, r *http.Request) {
 
 	// Build and execute the SELECT query.
 	selectReq := connector.SelectRequest{
-		Table:  tableName,
-		Fields: fields,
-		Filter: filterSQL,
-		Order:  orderSQL,
-		Limit:  limit,
-		Offset: offset,
+		Table:      tableName,
+		Fields:     fields,
+		Filter:     filterSQL,
+		FilterArgs: filterParams,
+		Order:      orderSQL,
+		Limit:      limit,
+		Offset:     offset,
 	}
 
 	sqlStr, args, err := conn.BuildSelect(r.Context(), selectReq)
@@ -149,13 +150,8 @@ func (h *TableHandler) QueryRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Merge filter params with query args. The filter params come first
-	// (they are embedded in the SQL), and the connector may append LIMIT/OFFSET
-	// params after.
-	allArgs := append(filterParams, args...)
-
 	db := conn.DB()
-	rows, err := db.QueryxContext(r.Context(), sqlStr, allArgs...)
+	rows, err := db.QueryxContext(r.Context(), sqlStr, args...)
 	if err != nil {
 		code, msg := classifyDBError(err, "Query failed")
 		writeError(w, code, msg)
@@ -605,14 +601,34 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	record := body
+	if res, ok := body["resource"]; ok {
+		if resSlice, ok := res.([]interface{}); ok && len(resSlice) > 0 {
+			if first, ok := resSlice[0].(map[string]interface{}); ok {
+				record = first
+			}
+		}
+	}
+
+	delete(record, "resource")
+	delete(record, "ids")
+
+	if len(record) == 0 {
+		writeError(w, http.StatusBadRequest, "No fields to update")
+		return
+	}
+
 	filterStr := queryString(r, "filter")
 	var filterSQL string
 	var filterParams []interface{}
 	if filterStr != "" {
+		// Parse filter with startIndex offset past the SET columns so that
+		// indexed placeholders ($N, @pN) don't collide with SET placeholders.
+		numSetCols := len(record)
 		phFunc := func(index int) string {
 			return conn.ParameterPlaceholder(index)
 		}
-		parsed, err := query.ParseFilter(filterStr, phFunc, 1)
+		parsed, err := query.ParseFilter(filterStr, phFunc, numSetCols+1)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "Invalid filter: "+err.Error())
 			return
@@ -636,33 +652,17 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	record := body
-	if res, ok := body["resource"]; ok {
-		if resSlice, ok := res.([]interface{}); ok && len(resSlice) > 0 {
-			if first, ok := resSlice[0].(map[string]interface{}); ok {
-				record = first
-			}
-		}
-	}
-
-	delete(record, "resource")
-	delete(record, "ids")
-
-	if len(record) == 0 {
-		writeError(w, http.StatusBadRequest, "No fields to update")
-		return
-	}
-
 	if filterSQL == "" && len(ids) == 0 {
 		writeError(w, http.StatusBadRequest, "Filter or IDs required for update")
 		return
 	}
 
 	updateReq := connector.UpdateRequest{
-		Table:  tableName,
-		Record: record,
-		Filter: filterSQL,
-		IDs:    ids,
+		Table:      tableName,
+		Record:     record,
+		Filter:     filterSQL,
+		FilterArgs: filterParams,
+		IDs:        ids,
 	}
 
 	sqlStr, args, err := conn.BuildUpdate(r.Context(), updateReq)
@@ -670,12 +670,6 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to build update: "+err.Error())
 		return
 	}
-
-	numSetArgs := len(record)
-	allArgs := make([]interface{}, 0, len(args)+len(filterParams))
-	allArgs = append(allArgs, args[:numSetArgs]...)
-	allArgs = append(allArgs, filterParams...)
-	allArgs = append(allArgs, args[numSetArgs:]...)
 
 	// Choose executor: transaction for rollback mode, raw DB otherwise.
 	mode := parseBatchMode(r)
@@ -696,7 +690,7 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 	updated := make([]map[string]interface{}, 0)
 
 	if conn.SupportsReturning() {
-		rows, err := exec.QueryxContext(r.Context(), sqlStr, allArgs...)
+		rows, err := exec.QueryxContext(r.Context(), sqlStr, args...)
 		if err != nil {
 			code, msg := classifyDBError(err, "Update failed")
 			writeError(w, code, msg)
@@ -718,7 +712,7 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		result, err := exec.ExecContext(r.Context(), sqlStr, allArgs...)
+		result, err := exec.ExecContext(r.Context(), sqlStr, args...)
 		if err != nil {
 			code, msg := classifyDBError(err, "Update failed")
 			writeError(w, code, msg)
@@ -812,9 +806,10 @@ func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deleteReq := connector.DeleteRequest{
-		Table:  tableName,
-		Filter: filterSQL,
-		IDs:    ids,
+		Table:      tableName,
+		Filter:     filterSQL,
+		FilterArgs: filterParams,
+		IDs:        ids,
 	}
 
 	sqlStr, args, err := conn.BuildDelete(r.Context(), deleteReq)
@@ -822,8 +817,6 @@ func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to build delete: "+err.Error())
 		return
 	}
-
-	allArgs := append(filterParams, args...)
 
 	// Choose executor: transaction for rollback mode, raw DB otherwise.
 	mode := parseBatchMode(r)
@@ -841,7 +834,7 @@ func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 		exec = tx
 	}
 
-	result, err := exec.ExecContext(r.Context(), sqlStr, allArgs...)
+	result, err := exec.ExecContext(r.Context(), sqlStr, args...)
 	if err != nil {
 		code, msg := classifyDBError(err, "Delete failed")
 		writeError(w, code, msg)

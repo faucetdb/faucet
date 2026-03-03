@@ -19,6 +19,7 @@ func (c *MySQLConnector) BuildSelect(_ context.Context, req connector.SelectRequ
 
 	var b strings.Builder
 	var args []interface{}
+	args = append(args, req.FilterArgs...)
 
 	// SELECT clause
 	b.WriteString("SELECT ")
@@ -151,7 +152,7 @@ func (c *MySQLConnector) BuildUpdate(_ context.Context, req connector.UpdateRequ
 	b.WriteString(".")
 	b.WriteString(c.QuoteIdentifier(req.Table))
 
-	// SET clause
+	// SET clause — positional ? params come first
 	b.WriteString(" SET ")
 	for i, col := range columns {
 		if i > 0 {
@@ -161,6 +162,9 @@ func (c *MySQLConnector) BuildUpdate(_ context.Context, req connector.UpdateRequ
 		b.WriteString(" = ?")
 		args = append(args, req.Record[col])
 	}
+
+	// Append filter args — filter ? placeholders follow SET ? placeholders
+	args = append(args, req.FilterArgs...)
 
 	// WHERE clause
 	b.WriteString(" WHERE ")
@@ -196,6 +200,9 @@ func (c *MySQLConnector) BuildDelete(_ context.Context, req connector.DeleteRequ
 
 	var b strings.Builder
 	var args []interface{}
+
+	// Start with filter args — filter ? placeholders appear first in WHERE
+	args = append(args, req.FilterArgs...)
 
 	// DELETE FROM
 	b.WriteString("DELETE FROM ")

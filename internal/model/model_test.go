@@ -9,11 +9,11 @@ import (
 func TestDefaultPoolConfig(t *testing.T) {
 	pc := DefaultPoolConfig()
 
-	if pc.MaxOpenConns != 25 {
-		t.Errorf("MaxOpenConns = %d, want 25", pc.MaxOpenConns)
+	if pc.MaxOpenConns != 100 {
+		t.Errorf("MaxOpenConns = %d, want 100", pc.MaxOpenConns)
 	}
-	if pc.MaxIdleConns != 5 {
-		t.Errorf("MaxIdleConns = %d, want 5", pc.MaxIdleConns)
+	if pc.MaxIdleConns != 25 {
+		t.Errorf("MaxIdleConns = %d, want 25", pc.MaxIdleConns)
 	}
 	if pc.ConnMaxLifetime != 5*time.Minute {
 		t.Errorf("ConnMaxLifetime = %v, want %v", pc.ConnMaxLifetime, 5*time.Minute)

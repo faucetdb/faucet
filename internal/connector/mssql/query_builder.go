@@ -20,7 +20,8 @@ func (c *MSSQLConnector) BuildSelect(_ context.Context, req connector.SelectRequ
 
 	var b strings.Builder
 	var args []interface{}
-	paramIdx := 1
+	args = append(args, req.FilterArgs...)
+	paramIdx := len(args) + 1
 
 	// SELECT clause
 	b.WriteString("SELECT ")
@@ -163,7 +164,7 @@ func (c *MSSQLConnector) BuildUpdate(_ context.Context, req connector.UpdateRequ
 	b.WriteString(".")
 	b.WriteString(c.QuoteIdentifier(req.Table))
 
-	// SET clause
+	// SET clause — uses @p1..@pN
 	b.WriteString(" SET ")
 	for i, col := range columns {
 		if i > 0 {
@@ -177,6 +178,10 @@ func (c *MSSQLConnector) BuildUpdate(_ context.Context, req connector.UpdateRequ
 
 	// OUTPUT clause
 	b.WriteString(" OUTPUT INSERTED.*")
+
+	// Append filter args — filter SQL already has @pN+1.. placeholders
+	args = append(args, req.FilterArgs...)
+	paramIdx += len(req.FilterArgs)
 
 	// WHERE clause
 	b.WriteString(" WHERE ")
@@ -213,7 +218,10 @@ func (c *MSSQLConnector) BuildDelete(_ context.Context, req connector.DeleteRequ
 
 	var b strings.Builder
 	var args []interface{}
-	paramIdx := 1
+
+	// Start with filter args — filter SQL already has @p1.. placeholders
+	args = append(args, req.FilterArgs...)
+	paramIdx := len(args) + 1
 
 	// DELETE FROM
 	b.WriteString("DELETE FROM ")

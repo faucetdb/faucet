@@ -198,6 +198,10 @@ func (c *OracleConnector) BuildUpdate(_ context.Context, req connector.UpdateReq
 		paramIdx++
 	}
 
+	// Append filter args after SET args so placeholders in the filter resolve correctly
+	args = append(args, req.FilterArgs...)
+	paramIdx += len(req.FilterArgs)
+
 	// WHERE clause
 	b.WriteString(" WHERE ")
 	whereParts := make([]string, 0, 2)
@@ -234,7 +238,8 @@ func (c *OracleConnector) BuildDelete(_ context.Context, req connector.DeleteReq
 
 	var b strings.Builder
 	var args []interface{}
-	paramIdx := 1
+	args = append(args, req.FilterArgs...)
+	paramIdx := len(args) + 1
 
 	// DELETE FROM
 	b.WriteString("DELETE FROM ")

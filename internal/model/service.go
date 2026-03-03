@@ -33,8 +33,8 @@ type PoolConfig struct {
 // DefaultPoolConfig returns sensible defaults for a database connection pool.
 func DefaultPoolConfig() PoolConfig {
 	return PoolConfig{
-		MaxOpenConns:    25,
-		MaxIdleConns:    5,
+		MaxOpenConns:    100,
+		MaxIdleConns:    25,
 		ConnMaxLifetime: 5 * time.Minute,
 		ConnMaxIdleTime: 1 * time.Minute,
 		PingInterval:    30 * time.Second,

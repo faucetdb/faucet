@@ -19,6 +19,7 @@ func (c *SnowflakeConnector) BuildSelect(_ context.Context, req connector.Select
 
 	var b strings.Builder
 	var args []interface{}
+	args = append(args, req.FilterArgs...)
 
 	// SELECT clause
 	b.WriteString("SELECT ")
@@ -162,6 +163,9 @@ func (c *SnowflakeConnector) BuildUpdate(_ context.Context, req connector.Update
 		args = append(args, req.Record[col])
 	}
 
+	// Append filter args after SET args so placeholders in the filter resolve correctly
+	args = append(args, req.FilterArgs...)
+
 	// WHERE clause
 	b.WriteString(" WHERE ")
 	whereParts := make([]string, 0, 2)
@@ -196,6 +200,7 @@ func (c *SnowflakeConnector) BuildDelete(_ context.Context, req connector.Delete
 
 	var b strings.Builder
 	var args []interface{}
+	args = append(args, req.FilterArgs...)
 
 	// DELETE FROM
 	b.WriteString("DELETE FROM ")

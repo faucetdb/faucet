@@ -165,7 +165,7 @@ func (c *PostgresConnector) BuildUpdate(_ context.Context, req connector.UpdateR
 	b.WriteString(".")
 	b.WriteString(c.QuoteIdentifier(req.Table))
 
-	// SET clause
+	// SET clause — uses $1..$N
 	b.WriteString(" SET ")
 	for i, col := range columns {
 		if i > 0 {
@@ -176,6 +176,10 @@ func (c *PostgresConnector) BuildUpdate(_ context.Context, req connector.UpdateR
 		args = append(args, req.Record[col])
 		paramIdx++
 	}
+
+	// Append filter args — filter SQL already has $N+1.. placeholders
+	args = append(args, req.FilterArgs...)
+	paramIdx += len(req.FilterArgs)
 
 	// WHERE clause
 	b.WriteString(" WHERE ")
@@ -216,7 +220,10 @@ func (c *PostgresConnector) BuildDelete(_ context.Context, req connector.DeleteR
 
 	var b strings.Builder
 	var args []interface{}
-	paramIdx := 1
+
+	// Start with filter args — filter SQL already has $1.. placeholders
+	args = append(args, req.FilterArgs...)
+	paramIdx := len(args) + 1
 
 	// DELETE FROM
 	b.WriteString("DELETE FROM ")
