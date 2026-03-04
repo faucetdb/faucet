@@ -722,7 +722,7 @@ type parsedValue struct {
 	value interface{} // string or numeric type
 }
 
-// parseValue consumes and returns the next value token (string or number).
+// parseValue consumes and returns the next value token (string, number, or boolean).
 func (p *parser) parseValue() (*parsedValue, error) {
 	t := p.advance()
 	if t == nil {
@@ -734,8 +734,20 @@ func (p *parser) parseValue() (*parsedValue, error) {
 		return &parsedValue{value: t.value}, nil
 	case tokNumber:
 		return p.parseNumericValue(t.value)
+	case tokIdentifier:
+		// Handle boolean literals: true/false (case-insensitive).
+		// These are tokenized as identifiers since they're not SQL keywords.
+		// Converting to Go bool ensures correct type binding for all databases,
+		// including PostgreSQL which rejects int64(1) for BOOLEAN columns.
+		switch strings.ToUpper(t.value) {
+		case "TRUE":
+			return &parsedValue{value: true}, nil
+		case "FALSE":
+			return &parsedValue{value: false}, nil
+		}
+		return nil, fmt.Errorf("expected a value (string, number, or boolean), got identifier %q at position %d", t.value, t.pos)
 	default:
-		return nil, fmt.Errorf("expected a value (string or number), got %q at position %d", t.value, t.pos)
+		return nil, fmt.Errorf("expected a value (string, number, or boolean), got %q at position %d", t.value, t.pos)
 	}
 }
 

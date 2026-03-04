@@ -455,6 +455,50 @@ func TestParseFilter(t *testing.T) {
 			nil,
 			true,
 		},
+
+		// Boolean literals.
+		{
+			"boolean true lowercase",
+			"is_active = true",
+			"is_active = $1",
+			[]interface{}{true},
+			false,
+		},
+		{
+			"boolean false lowercase",
+			"is_active = false",
+			"is_active = $1",
+			[]interface{}{false},
+			false,
+		},
+		{
+			"boolean TRUE uppercase",
+			"is_active = TRUE",
+			"is_active = $1",
+			[]interface{}{true},
+			false,
+		},
+		{
+			"boolean mixed case",
+			"is_active = True",
+			"is_active = $1",
+			[]interface{}{true},
+			false,
+		},
+		{
+			"boolean with AND",
+			"is_active = true AND category_id = 5",
+			"is_active = $1 AND category_id = $2",
+			[]interface{}{true, int64(5)},
+			false,
+		},
+		{
+			"boolean false with comparison",
+			"deleted = false AND status = 'active'",
+			"deleted = $1 AND status = $2",
+			[]interface{}{false, "active"},
+			false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -495,6 +539,55 @@ func TestParseFilter(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ParseFilter with startIndex > 1 (used by handleUpdate to offset past SET)
+// ---------------------------------------------------------------------------
+
+func TestParseFilter_StartIndex(t *testing.T) {
+	// This mirrors the exact flow used by the MCP handleUpdate handler:
+	// 1 SET column → startIndex = 2 → filter placeholders start at $2
+	result, err := ParseFilter("id = 42", DollarPlaceholder, 2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.SQL != "id = $2" {
+		t.Errorf("SQL: got %q, want %q", result.SQL, "id = $2")
+	}
+	if len(result.Params) != 1 || result.Params[0] != int64(42) {
+		t.Errorf("Params: got %v, want [42]", result.Params)
+	}
+
+	// 2 SET columns → startIndex = 3
+	result2, err := ParseFilter("status = 'active' AND id > 100", DollarPlaceholder, 3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result2.SQL != "status = $3 AND id > $4" {
+		t.Errorf("SQL: got %q, want %q", result2.SQL, "status = $3 AND id > $4")
+	}
+	if len(result2.Params) != 2 {
+		t.Fatalf("expected 2 params, got %d", len(result2.Params))
+	}
+	if result2.Params[0] != "active" {
+		t.Errorf("Params[0]: got %v, want 'active'", result2.Params[0])
+	}
+	if result2.Params[1] != int64(100) {
+		t.Errorf("Params[1]: got %v, want 100", result2.Params[1])
+	}
+
+	// MySQL: startIndex doesn't affect ? placeholders, but params are correct
+	resultMySQL, err := ParseFilter("id = 42", QuestionPlaceholder, 2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resultMySQL.SQL != "id = ?" {
+		t.Errorf("SQL: got %q, want %q", resultMySQL.SQL, "id = ?")
+	}
+	if len(resultMySQL.Params) != 1 || resultMySQL.Params[0] != int64(42) {
+		t.Errorf("Params: got %v, want [42]", resultMySQL.Params)
 	}
 }
 
