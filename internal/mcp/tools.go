@@ -541,6 +541,14 @@ func (s *MCPServer) handleInsert(
 
 	db := conn.DB()
 
+	// SQL Server: when inserting explicit values into an IDENTITY column,
+	// wrap the insert in a transaction with SET IDENTITY_INSERT ON/OFF.
+	if conn.DriverName() == "mssql" {
+		if needsIdentity := s.hasIdentityColumnInRecords(ctx, conn, tableName, records); needsIdentity {
+			return s.execMSSQLIdentityInsert(ctx, conn, tableName, sqlStr, args)
+		}
+	}
+
 	if conn.SupportsReturning() {
 		rows, err := db.QueryxContext(ctx, sqlStr, args...)
 		if err != nil {
@@ -851,6 +859,66 @@ func (s *MCPServer) handleRawSQL(
 	}
 
 	return successJSON(result)
+}
+
+// hasIdentityColumnInRecords checks if any record contains a column that is
+// an IDENTITY (auto-increment) column in the target SQL Server table.
+func (s *MCPServer) hasIdentityColumnInRecords(ctx context.Context, conn connector.Connector, tableName string, records []map[string]interface{}) bool {
+	table, err := conn.IntrospectTable(ctx, tableName)
+	if err != nil {
+		return false
+	}
+	identityCols := make(map[string]bool)
+	for _, col := range table.Columns {
+		if col.IsAutoIncrement {
+			identityCols[strings.ToLower(col.Name)] = true
+		}
+	}
+	if len(identityCols) == 0 {
+		return false
+	}
+	for _, record := range records {
+		for key := range record {
+			if identityCols[strings.ToLower(key)] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// execMSSQLIdentityInsert wraps a SQL Server INSERT in a transaction with
+// SET IDENTITY_INSERT ON/OFF so that explicit values can be inserted into
+// IDENTITY columns.
+func (s *MCPServer) execMSSQLIdentityInsert(ctx context.Context, conn connector.Connector, tableName, sqlStr string, args []interface{}) (*mcp.CallToolResult, error) {
+	qualifiedTable := conn.QuoteIdentifier(tableName)
+
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return toolError("Insert failed (begin transaction): %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, "SET IDENTITY_INSERT "+qualifiedTable+" ON"); err != nil {
+		return toolError("Insert failed (SET IDENTITY_INSERT ON): %v", err)
+	}
+
+	result, err := tx.ExecContext(ctx, sqlStr, args...)
+	if err != nil {
+		return toolError("Insert failed: %v", err)
+	}
+
+	// IDENTITY_INSERT OFF is automatic on transaction end, but be explicit.
+	_, _ = tx.ExecContext(ctx, "SET IDENTITY_INSERT "+qualifiedTable+" OFF")
+
+	if err := tx.Commit(); err != nil {
+		return toolError("Insert failed (commit): %v", err)
+	}
+
+	affected, _ := result.RowsAffected()
+	return successJSON(map[string]interface{}{
+		"count": affected,
+	})
 }
 
 // cleanMapValues converts []byte values from database scans into strings
