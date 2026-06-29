@@ -12,6 +12,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/faucetdb/faucet/internal/model"
+	"github.com/faucetdb/faucet/internal/query"
 )
 
 // QueryExecutor is the common interface satisfied by both *sqlx.DB and *sqlx.Tx,
@@ -26,9 +27,11 @@ type QueryExecutor interface {
 type SelectRequest struct {
 	Table      string
 	Fields     []string
+	Projection []query.SelectItem // structured SELECT list (plain columns and/or aggregates); takes precedence over Fields when set
 	Filter     string
 	FilterArgs []interface{}
 	Order      string
+	GroupBy    []string
 	Limit      int
 	Offset     int
 	Cursor     string
@@ -234,7 +237,7 @@ func sanitizeURLDSN(dsn string) string {
 
 // SchemaChange represents a table alteration.
 type SchemaChange struct {
-	Type       string        // "add_column", "drop_column", "rename_column", "modify_column"
+	Type       string // "add_column", "drop_column", "rename_column", "modify_column"
 	Column     string
 	NewName    string        // for rename
 	Definition *model.Column // for add/modify

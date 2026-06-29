@@ -70,20 +70,38 @@ func (h *TableHandler) QueryRecords(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters.
 	filterStr := queryString(r, "filter")
 	fieldsStr := queryString(r, "fields")
+	groupStr := queryString(r, "group")
 	orderStr := queryString(r, "order")
 	idsStr := queryString(r, "ids")
 	limit := clampInt(queryInt(r, "limit", 25), 0, 1000)
 	offset := queryInt(r, "offset", 0)
 	includeCount := queryBool(r, "include_count")
 
-	// Validate and parse fields.
-	var fields []string
+	// Parse the projection (plain columns and/or aggregates like SUM(amount)).
+	var projection []query.SelectItem
 	if fieldsStr != "" {
-		fields, err = query.ParseFieldSelection(fieldsStr)
+		projection, err = query.ParseProjection(fieldsStr)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "Invalid fields parameter: "+err.Error())
 			return
 		}
+	}
+
+	// Parse GROUP BY columns.
+	var groupBy []string
+	if groupStr != "" {
+		groupBy, err = query.ParseGroupBy(groupStr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid group parameter: "+err.Error())
+			return
+		}
+	}
+
+	// Reject projections that mix aggregates and plain columns inconsistently,
+	// so the SQL is well-defined and portable across dialects.
+	if err := query.ValidateGroupedProjection(projection, groupBy); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	// Parse and parameterize the filter expression.
@@ -136,10 +154,11 @@ func (h *TableHandler) QueryRecords(w http.ResponseWriter, r *http.Request) {
 	// Build and execute the SELECT query.
 	selectReq := connector.SelectRequest{
 		Table:      tableName,
-		Fields:     fields,
+		Projection: projection,
 		Filter:     filterSQL,
 		FilterArgs: filterParams,
 		Order:      orderSQL,
+		GroupBy:    groupBy,
 		Limit:      limit,
 		Offset:     offset,
 	}
@@ -196,9 +215,10 @@ func (h *TableHandler) QueryRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Optionally fetch total count.
+	// Optionally fetch total count. Skipped for grouped queries, where a plain
+	// COUNT(*) would count underlying rows rather than result groups.
 	var total *int64
-	if includeCount {
+	if includeCount && len(groupBy) == 0 {
 		countReq := connector.CountRequest{
 			Table:  tableName,
 			Filter: filterSQL,

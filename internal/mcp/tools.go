@@ -97,8 +97,14 @@ func (s *MCPServer) registerTools(srv *server.MCPServer) {
 				mcp.Description("Filter expression (e.g. \"status = 'active' AND age > 21\")"),
 			),
 			mcp.WithArray("fields",
-				mcp.Description("List of column names to return. Omit for all columns."),
+				mcp.Description("List of columns to return, each either a plain column or an "+
+					"aggregate such as \"SUM(amount)\", \"COUNT(*)\", or \"AVG(price) AS avg_price\". "+
+					"Omit for all columns."),
 				mcp.WithStringItems(),
+			),
+			mcp.WithString("group",
+				mcp.Description("Comma-separated columns to GROUP BY (e.g. \"region,status\"). "+
+					"Aggregate in 'fields' to compute per group; order by an aggregate's alias."),
 			),
 			mcp.WithString("order",
 				mcp.Description("Order clause (e.g. \"created_at DESC, name ASC\")"),
@@ -385,6 +391,7 @@ func (s *MCPServer) handleQuery(
 
 	filterStr := optionalString(request, "filter")
 	fields := optionalStringSlice(request, "fields")
+	groupStr := optionalString(request, "group")
 	orderStr := optionalString(request, "order")
 	limit := clamp(optionalInt(request, "limit", 25), 1, 1000)
 	offset := optionalInt(request, "offset", 0)
@@ -398,9 +405,10 @@ func (s *MCPServer) handleQuery(
 			serviceName, s.registry.ListServices())
 	}
 
-	// Parse and validate fields.
+	// Parse the projection (plain columns and/or aggregates).
+	var projection []query.SelectItem
 	if len(fields) > 0 {
-		validated, err := query.ParseFieldSelection(strings.Join(fields, ","))
+		projection, err = query.ParseProjection(strings.Join(fields, ","))
 		if err != nil {
 			tableSchema, _ := conn.IntrospectTable(ctx, tableName)
 			var colNames []string
@@ -411,7 +419,19 @@ func (s *MCPServer) handleQuery(
 			}
 			return toolError("Invalid fields: %v\n\nAvailable columns: %v", err, colNames)
 		}
-		fields = validated
+	}
+
+	// Parse GROUP BY columns and validate aggregate/group consistency.
+	var groupBy []string
+	if groupStr != "" {
+		groupBy, err = query.ParseGroupBy(groupStr)
+		if err != nil {
+			return toolError("Invalid group clause: %v\n\n"+
+				"Group syntax: column[,column...]  (e.g. region,status)", err)
+		}
+	}
+	if err := query.ValidateGroupedProjection(projection, groupBy); err != nil {
+		return toolError("%v", err)
 	}
 
 	// Parse filter expression into parameterized SQL.
@@ -451,10 +471,11 @@ func (s *MCPServer) handleQuery(
 	// Build and execute the query.
 	selectReq := connector.SelectRequest{
 		Table:      tableName,
-		Fields:     fields,
+		Projection: projection,
 		Filter:     filterSQL,
 		FilterArgs: filterParams,
 		Order:      orderSQL,
+		GroupBy:    groupBy,
 		Limit:      limit,
 		Offset:     offset,
 	}
@@ -518,7 +539,7 @@ func (s *MCPServer) handleInsert(
 
 	records := getObjectSliceArg(request, "records")
 	if len(records) == 0 {
-		return toolError("No records provided. The 'records' parameter must be an array "+
+		return toolError("No records provided. The 'records' parameter must be an array " +
 			"of objects, e.g. [{\"name\": \"Alice\", \"age\": 30}]")
 	}
 
@@ -603,7 +624,7 @@ func (s *MCPServer) handleUpdate(
 	}
 	filterStr, err := requireString(request, "filter")
 	if err != nil {
-		return toolError("A filter is required for update operations to prevent "+
+		return toolError("A filter is required for update operations to prevent " +
 			"accidental full-table updates. Example: id = 42")
 	}
 
@@ -615,7 +636,7 @@ func (s *MCPServer) handleUpdate(
 
 	record := getObjectArg(request, "record")
 	if len(record) == 0 {
-		return toolError("No fields to update. The 'record' parameter must be an object "+
+		return toolError("No fields to update. The 'record' parameter must be an object " +
 			"with column names and values, e.g. {\"status\": \"archived\"}")
 	}
 
@@ -710,7 +731,7 @@ func (s *MCPServer) handleDelete(
 	}
 	filterStr, err := requireString(request, "filter")
 	if err != nil {
-		return toolError("A filter is required for delete operations to prevent "+
+		return toolError("A filter is required for delete operations to prevent " +
 			"accidental full-table deletes. Example: id = 42")
 	}
 

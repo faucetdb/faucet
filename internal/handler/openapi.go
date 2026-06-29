@@ -458,7 +458,13 @@ func buildQueryParameters() []map[string]interface{} {
 		{
 			"name":        "fields",
 			"in":          "query",
-			"description": "Comma-separated list of fields to return",
+			"description": "Comma-separated list of fields to return; each may be a plain column or an aggregate such as SUM(amount), COUNT(*), or AVG(price) AS avg_price",
+			"schema":      map[string]interface{}{"type": "string"},
+		},
+		{
+			"name":        "group",
+			"in":          "query",
+			"description": "Comma-separated columns to group by (e.g. 'region,status'); combine with aggregates in 'fields'",
 			"schema":      map[string]interface{}{"type": "string"},
 		},
 		{

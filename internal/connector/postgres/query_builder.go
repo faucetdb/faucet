@@ -7,6 +7,7 @@ import (
 
 	"github.com/faucetdb/faucet/internal/connector"
 	"github.com/faucetdb/faucet/internal/model"
+	"github.com/faucetdb/faucet/internal/query"
 )
 
 // BuildSelect constructs a SELECT query from the given request.
@@ -24,15 +25,7 @@ func (c *PostgresConnector) BuildSelect(_ context.Context, req connector.SelectR
 
 	// SELECT clause
 	b.WriteString("SELECT ")
-	if len(req.Fields) > 0 {
-		quoted := make([]string, len(req.Fields))
-		for i, f := range req.Fields {
-			quoted[i] = c.QuoteIdentifier(f)
-		}
-		b.WriteString(strings.Join(quoted, ", "))
-	} else {
-		b.WriteString("*")
-	}
+	b.WriteString(query.BuildSelectList(req.Projection, req.Fields, c.QuoteIdentifier))
 
 	// FROM clause
 	b.WriteString(" FROM ")
@@ -44,6 +37,12 @@ func (c *PostgresConnector) BuildSelect(_ context.Context, req connector.SelectR
 	if req.Filter != "" {
 		b.WriteString(" WHERE ")
 		b.WriteString(req.Filter)
+	}
+
+	// GROUP BY clause
+	if gb := query.BuildGroupBy(req.GroupBy, c.QuoteIdentifier); gb != "" {
+		b.WriteString(" ")
+		b.WriteString(gb)
 	}
 
 	// ORDER BY clause
