@@ -706,7 +706,15 @@ func listQueryParameters() openapi3.Parameters {
 		},
 		&openapi3.ParameterRef{
 			Value: openapi3.NewQueryParameter("fields").
-				WithDescription("Comma-separated list of fields to include in the response.").
+				WithDescription("Comma-separated list of fields to include in the response. " +
+					"Each field may be a plain column or an aggregate such as \"SUM(amount)\", " +
+					"\"COUNT(*)\", or \"AVG(price) AS avg_price\". Combine with 'group' to aggregate per group.").
+				WithSchema(openapi3.NewStringSchema()),
+		},
+		&openapi3.ParameterRef{
+			Value: openapi3.NewQueryParameter("group").
+				WithDescription("Comma-separated columns to group by (e.g. \"region,status\"). " +
+					"Use aggregates in 'fields' to compute per-group values; order by an aggregate's alias.").
 				WithSchema(openapi3.NewStringSchema()),
 		},
 		&openapi3.ParameterRef{
