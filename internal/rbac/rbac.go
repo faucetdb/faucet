@@ -11,6 +11,12 @@
 //   - an inactive role grants nothing
 //   - a rule with verb_mask=0 grants nothing
 //
+// Service and component patterns are matched case-sensitively: a pattern
+// must spell the service or table name exactly as it appears in the request
+// URL. Service names are case-sensitive keys, and quoted table names are
+// case-sensitive on PostgreSQL and MySQL, so "mydb" and "MYDB" (or
+// "_table/items" and "_table/Items") are distinct resources.
+//
 // Admin principals (JWT sessions) bypass RBAC entirely.
 package rbac
 
@@ -168,21 +174,24 @@ func NormalizeComponent(routePath string) string {
 }
 
 // MatchService reports whether a rule's service pattern matches service.
-// Supported patterns: "*" (or empty) for all services, an exact name
-// (case-insensitive), or a prefix followed by "*" (e.g. "prod_*").
+// Supported patterns: "*" (or empty) for all services, an exact name, or a
+// prefix followed by "*" (e.g. "prod_*"). Matching is case-sensitive: the
+// pattern must match the service name exactly as it is used in the URL.
 func MatchService(pattern, service string) bool {
 	p := strings.TrimSpace(pattern)
 	if p == "" || p == Wildcard {
 		return true
 	}
 	if strings.HasSuffix(p, Wildcard) {
-		return hasPrefixFold(service, strings.TrimSuffix(p, Wildcard))
+		return strings.HasPrefix(service, strings.TrimSuffix(p, Wildcard))
 	}
-	return strings.EqualFold(p, service)
+	return p == service
 }
 
 // MatchComponent reports whether a rule's component pattern matches the
-// (normalized) request component. Supported patterns, all case-insensitive:
+// (normalized) request component. Matching is case-sensitive: the pattern
+// must spell the component exactly as it appears in the URL. Supported
+// patterns:
 //
 //   - "*" or "" matches everything
 //   - an exact component, e.g. "_table/customers" or "_table"
@@ -196,30 +205,26 @@ func MatchComponent(pattern, component string) bool {
 	if p == "" || p == Wildcard {
 		return true
 	}
-	if strings.EqualFold(p, c) {
+	if p == c {
 		return true
 	}
 	if strings.HasSuffix(p, Wildcard) {
 		prefix := strings.TrimSuffix(p, Wildcard)
-		if hasPrefixFold(c, prefix) {
+		if strings.HasPrefix(c, prefix) {
 			return true
 		}
 		// "_table/*" also covers the bare collection "_table".
-		if strings.HasSuffix(prefix, "/") && strings.EqualFold(strings.TrimSuffix(prefix, "/"), c) {
+		if strings.HasSuffix(prefix, "/") && strings.TrimSuffix(prefix, "/") == c {
 			return true
 		}
 		return false
 	}
 	if !strings.Contains(p, "/") {
-		if i := strings.Index(c, "/"); i >= 0 && strings.EqualFold(c[i+1:], p) {
+		if i := strings.Index(c, "/"); i >= 0 && c[i+1:] == p {
 			return true
 		}
 	}
 	return false
-}
-
-func hasPrefixFold(s, prefix string) bool {
-	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
 }
 
 // Allowed reports whether the access rules grant every verb bit in verb on

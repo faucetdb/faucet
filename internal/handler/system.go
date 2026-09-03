@@ -518,12 +518,20 @@ func (h *SystemHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If access rules were provided, set them.
+	// If access rules were provided, set them, then reload the stored rules
+	// so the response reflects what was persisted (assigned ids, "" patterns
+	// normalized to "*", default filter_op) rather than the raw request.
 	if len(role.Access) > 0 {
 		if err := h.store.SetRoleAccess(r.Context(), role.ID, role.Access); err != nil {
 			writeError(w, http.StatusInternalServerError, "Failed to set role access: "+err.Error())
 			return
 		}
+		access, err := h.store.GetRoleAccess(r.Context(), role.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to load role access: "+err.Error())
+			return
+		}
+		role.Access = access
 	}
 
 	writeJSON(w, http.StatusCreated, roleToMap(&role))
@@ -601,13 +609,21 @@ func (h *SystemHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If access rules were provided, replace them.
+	// If access rules were provided, replace them, then reload the stored
+	// rules so the response carries the persisted form (assigned ids, ""
+	// patterns normalized to "*", default filter_op) rather than the raw
+	// request slice.
 	if updates.Access != nil {
 		if err := h.store.SetRoleAccess(r.Context(), id, updates.Access); err != nil {
 			writeError(w, http.StatusInternalServerError, "Failed to update role access: "+err.Error())
 			return
 		}
-		existing.Access = updates.Access
+		access, err := h.store.GetRoleAccess(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to load role access: "+err.Error())
+			return
+		}
+		existing.Access = access
 	}
 
 	writeJSON(w, http.StatusOK, roleToMap(existing))

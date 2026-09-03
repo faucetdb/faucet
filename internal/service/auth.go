@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -28,15 +29,26 @@ type JWTPrincipal struct {
 	Email   string
 }
 
+// LastUsedInterval is the minimum time between two last_used writes for
+// the same API key. ValidateAPIKey is on the hot path of every API-key
+// request and the config store runs on a single SQLite connection, so
+// persisting last_used on every call would compete with the RBAC reads
+// each request also needs. It is a variable so tests can shorten it.
+var LastUsedInterval = 60 * time.Second
+
 type AuthService struct {
 	store     *config.Store
 	jwtSecret []byte
+
+	lastUsedMu sync.Mutex
+	lastUsed   map[int64]time.Time // key ID -> time of last persisted last_used write
 }
 
 func NewAuthService(store *config.Store, jwtSecret string) *AuthService {
 	return &AuthService{
 		store:     store,
 		jwtSecret: []byte(jwtSecret),
+		lastUsed:  make(map[int64]time.Time),
 	}
 }
 
@@ -57,13 +69,30 @@ func (s *AuthService) ValidateAPIKey(ctx context.Context, rawKey string) (*APIKe
 		return nil, ErrTokenExpired
 	}
 
-	// Update last used timestamp (fire and forget)
-	go s.store.UpdateAPIKeyLastUsed(context.Background(), key.ID)
+	s.touchLastUsed(key.ID)
 
 	return &APIKeyPrincipal{
 		KeyID:  key.ID,
 		RoleID: key.RoleID,
 	}, nil
+}
+
+// touchLastUsed persists the key's last_used timestamp, but at most once
+// per LastUsedInterval per key. The write is fire-and-forget: it never
+// blocks or fails the request, and a lost write only makes last_used
+// slightly stale.
+func (s *AuthService) touchLastUsed(keyID int64) {
+	now := time.Now()
+
+	s.lastUsedMu.Lock()
+	if last, ok := s.lastUsed[keyID]; ok && now.Sub(last) < LastUsedInterval {
+		s.lastUsedMu.Unlock()
+		return
+	}
+	s.lastUsed[keyID] = now
+	s.lastUsedMu.Unlock()
+
+	go s.store.UpdateAPIKeyLastUsed(context.Background(), keyID) //nolint:errcheck
 }
 
 // ValidateJWT verifies a JWT bearer token and returns the associated admin identity.
