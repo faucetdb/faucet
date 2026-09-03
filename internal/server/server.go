@@ -20,6 +20,7 @@ import (
 	"github.com/faucetdb/faucet/internal/connector"
 	"github.com/faucetdb/faucet/internal/handler"
 	fmcp "github.com/faucetdb/faucet/internal/mcp"
+	"github.com/faucetdb/faucet/internal/rbac"
 	"github.com/faucetdb/faucet/internal/server/middleware"
 	"github.com/faucetdb/faucet/internal/service"
 	"github.com/faucetdb/faucet/internal/ui"
@@ -169,9 +170,15 @@ func (s *Server) setupRouter() {
 			})
 		})
 
-		// Dynamic database service APIs
+		// Dynamic database service APIs.
+		// Middleware order matters: authenticate, then enforce the role's
+		// access rules (verb_mask per service/component), then refuse
+		// writes to read-only services.
+		enforcer := rbac.NewEnforcer(s.store)
 		r.Route("/{serviceName}", func(r chi.Router) {
 			r.Use(middleware.Authenticate(s.authSvc))
+			r.Use(middleware.RequireAccess(enforcer))
+			r.Use(middleware.ReadOnlyGuard(s.store))
 
 			tableHandler := handler.NewTableHandler(s.registry, s.store)
 			schemaHandler := handler.NewSchemaHandler(s.registry, s.store)
