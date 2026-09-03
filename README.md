@@ -99,8 +99,8 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 ### Security & Access Control
 - **API key authentication** — SHA-256 hashed keys with per-key role assignment
 - **JWT authentication** — HMAC-SHA256 signed tokens for admin sessions
-- **Role-based access control (RBAC)** — Per-table verb permissions (GET, POST, PUT, DELETE)
-- **Row-level security filters** — Restrict data access per role with SQL filter expressions
+- **Role-based access control (RBAC)** — Per-table verb permissions (GET, POST, PUT, PATCH, DELETE)
+- **Row-level security filters** — Filter expressions are stored per access rule and returned by the API; applying them to queries is planned and not enforced yet
 - **Schema contract locking** — Lock your API contract against silent breaking schema changes with three modes (none, auto, strict), drift detection, and CLI management
 
 ### AI Agent Integration (MCP)
@@ -261,7 +261,7 @@ A role is a list of rules `{service_name, component, verb_mask}`. An API key inh
 | DELETE | 16 |
 | all | 31 |
 
-**Matching** (case-insensitive):
+**Matching** (case-sensitive — patterns must match the service and table names exactly as they appear in the URL):
 
 - `service_name`: `*` (any service), an exact name (`mydb`), or a prefix wildcard (`prod_*`)
 - `component`: `*` (anything), an exact component (`_table/customers`, `_schema`), a prefix wildcard (`_table/*` — every table *and* the `_table` listing), or a bare name (`customers`, which matches `_table/customers`, `_schema/customers`, ...)
@@ -275,7 +275,7 @@ A role is a list of rules `{service_name, component, verb_mask}`. An API key inh
 
 Services flagged `read_only` reject every non-GET request regardless of role.
 
-**MCP.** Tools map onto the same verbs: `faucet_query` = GET, `faucet_insert` = POST, `faucet_update` = PATCH, `faucet_delete` = DELETE, `faucet_list_tables` = GET on `_table`, `faucet_describe_table` = GET on `_schema/{table}`. `faucet_raw_sql` requires all five verbs on a rule matching component `_sql` (e.g. `*`). `faucet_list_services` only lists services the role can reach. `faucet mcp` in stdio mode runs with local admin privileges; `faucet mcp --transport http` requires an API key or JWT, exactly like the main server.
+**MCP.** Tools map onto the same verbs: `faucet_query` = GET, `faucet_insert` = POST, `faucet_update` = PATCH, `faucet_delete` = DELETE, `faucet_list_tables` = GET on `_table`, `faucet_describe_table` = GET on `_schema/{table}`. `faucet_raw_sql` requires all five verbs on a rule matching component `_sql` (e.g. `*`). `faucet_list_services` only lists services the role can reach. `faucet mcp` in stdio mode runs with local admin privileges; `faucet mcp --transport http` requires the same API key or JWT credentials as the main server.
 
 **Granting rules** from the CLI:
 
@@ -300,7 +300,9 @@ curl -X PUT -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" 
 
 > Row-level `filters` on a rule are stored and returned by the API but are not yet applied to queries.
 
-**Upgrading.** Before this fix, role rules were stored but never enforced for API-key requests. Roles created with `faucet role create` that were never given rules will now be denied with `403` — grant them rules with `faucet role grant` or the admin UI.
+**Upgrading.** Before this fix, role rules were stored but never enforced for API-key requests. Roles created with `faucet role create` that were never given rules will now be denied with `403` — grant them rules with `faucet role grant` or the admin UI. Roles created in the admin UI default to GET-only on all services, so API keys that previously wrote data through such roles now need `POST`/`PUT`/`PATCH`/`DELETE` granted explicitly. On startup `faucet serve` logs a warning for every role that has active API keys but would deny all requests (no rules, only `verb_mask: 0` rules, or inactive), together with the `faucet role grant` command that fixes it.
+
+The admin JWT signing secret is no longer a built-in default: when `auth.jwt_secret` / `FAUCET_AUTH_JWT_SECRET` (alias `FAUCET_JWT_SECRET`) is not configured, a random secret is generated on first start and persisted in the data directory. Existing admin sessions are invalidated by the upgrade unless the secret was already configured — log in again.
 
 ## API Routes
 

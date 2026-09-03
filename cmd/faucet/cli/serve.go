@@ -240,12 +240,17 @@ func runServe(host string, port int, noUI, dev bool) error {
 		}
 	}
 
-	// 4. Initialize auth service
-	jwtSecret := viper.GetString("auth.jwt_secret")
-	if jwtSecret == "" {
-		jwtSecret = "faucet-dev-secret-change-me"
+	// 4. Initialize auth service. The JWT secret comes from config/env or is
+	// generated once and persisted in the config store; there is no
+	// hard-coded fallback because admin tokens bypass RBAC.
+	jwtSecret, err := resolveJWTSecret(cmd_ctx(), store, logger)
+	if err != nil {
+		return fmt.Errorf("resolve jwt secret: %w", err)
 	}
 	authSvc := service.NewAuthService(store, jwtSecret)
+
+	// Upgrade diagnostics: flag roles whose bound API keys will be denied.
+	warnUnusableRoles(cmd_ctx(), store, logger)
 
 	// 5. Check for first-run (no admin exists)
 	hasAdmin, err := store.HasAnyAdmin(cmd_ctx())
