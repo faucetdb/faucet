@@ -1,0 +1,90 @@
+name: Publish npm
+
+# Publishes @faucetdb/faucet and the six platform packages from the archives
+# attached to a GitHub release.
+#
+# Runs automatically after a successful "Release" workflow (workflow_run: the
+# release is created with GITHUB_TOKEN, so "on: release" would never fire), or
+# manually for a given tag (workflow_dispatch) to retry a failed/partial publish.
+# scripts/npm-publish.sh is idempotent: versions already on npm are skipped.
+#
+# Auth: with the NPM_TOKEN secret set the script uses it; with the secret absent
+# it uses npm trusted publishing (OIDC), which must be configured per package on
+# npmjs.com for owner "faucetdb", repo "faucet", workflow file "npm-publish.yml".
+# Do NOT add registry-url / NODE_AUTH_TOKEN to setup-node: it breaks OIDC.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, e.g. v0.1.13"
+        required: true
+        type: string
+      use_oidc:
+        description: "Ignore the NPM_TOKEN secret for this run and use trusted publishing (OIDC)"
+        required: false
+        type: boolean
+        default: false
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ inputs.version || github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish npm
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Resolve release version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          VERSION="${INPUT_VERSION:-$WORKFLOW_RUN_HEAD_BRANCH}"
+          # Anchored: the value reaches a shell below, and only final releases go to npm.
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Resolved version '${VERSION}' is not a final release tag (expected vX.Y.Z)"
+            exit 1
+          fi
+          echo "Publishing npm packages for ${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Update npm (trusted publishing needs >= 11.5.1)
+        # Pinned to the npm 11 line: npm@latest (12+) drops older Node 22 releases.
+        run: |
+          npm install -g npm@11
+          npm --version
+
+      - name: Publish npm packages
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          USE_OIDC: ${{ inputs.use_oidc }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Values are passed through the environment, never interpolated into the shell.
+        run: |
+          if [[ "$USE_OIDC" == "true" ]]; then
+            echo "use_oidc=true: ignoring the NPM_TOKEN secret for this run"
+            export NPM_TOKEN=""
+          fi
+          ./scripts/npm-publish.sh "$RELEASE_VERSION"
