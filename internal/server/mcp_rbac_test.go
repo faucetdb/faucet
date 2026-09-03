@@ -264,3 +264,146 @@ func TestMCPEndpoint_E2E_RBACServiceListingFiltered(t *testing.T) {
 		t.Errorf("ReadResource(faucet://schema/demo) error = %v, want forbidden", err)
 	}
 }
+
+func TestMCPEndpoint_E2E_NoServiceDisclosure(t *testing.T) {
+	env := setupMCPRBACEnv(t)
+
+	// A role scoped entirely to another service must not learn that
+	// "demo" exists from any tool error text.
+	scopedKey := createRoleWithKey(t, env, "mcp-otherdb", "faucet_mcp_rbac_otherdb_key_0001", []model.RoleAccess{
+		{ServiceName: "otherdb", Component: "*", VerbMask: model.VerbAll},
+	})
+	fullKey := createRoleWithKey(t, env, "mcp-full", "faucet_mcp_rbac_fullkey_key_0001", []model.RoleAccess{
+		{ServiceName: "*", Component: "*", VerbMask: model.VerbAll},
+	})
+
+	ts := httptest.NewServer(env.server.Router())
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	t.Run("scoped key", func(t *testing.T) {
+		c := newMCPAPIKeyClient(t, ctx, ts.URL, scopedKey)
+
+		// Forbidden on the real service: no listing of other services.
+		res, text := callTool(t, ctx, c, "faucet_query", map[string]interface{}{"service": mcpRBACService, "table": "users"})
+		if !res.IsError || !strings.Contains(text, "Forbidden") {
+			t.Fatalf("faucet_query: IsError=%v text=%q, want Forbidden", res.IsError, text)
+		}
+		if strings.Contains(text, "Available services") {
+			t.Errorf("faucet_query denial carries a service listing: %s", text)
+		}
+
+		// Missing "service" argument: the hint must not name "demo".
+		for _, tool := range []string{"faucet_list_tables", "faucet_describe_table", "faucet_query", "faucet_insert", "faucet_update", "faucet_delete", "faucet_raw_sql"} {
+			res, text := callTool(t, ctx, c, tool, map[string]interface{}{"table": "users", "sql": "SELECT 1"})
+			if !res.IsError {
+				t.Fatalf("%s without service: expected IsError=true, got %s", tool, text)
+			}
+			if strings.Contains(text, mcpRBACService) {
+				t.Errorf("%s without service leaked %q: %s", tool, mcpRBACService, text)
+			}
+		}
+
+		// Unknown service: still nothing about "demo".
+		res, text = callTool(t, ctx, c, "faucet_list_tables", map[string]interface{}{"service": "nope"})
+		if !res.IsError {
+			t.Fatalf("faucet_list_tables(nope): expected IsError=true, got %s", text)
+		}
+		if strings.Contains(text, mcpRBACService) {
+			t.Errorf("faucet_list_tables(nope) leaked %q: %s", mcpRBACService, text)
+		}
+	})
+
+	t.Run("full-access key keeps the hint", func(t *testing.T) {
+		c := newMCPAPIKeyClient(t, ctx, ts.URL, fullKey)
+
+		res, text := callTool(t, ctx, c, "faucet_list_tables", map[string]interface{}{})
+		if !res.IsError {
+			t.Fatalf("faucet_list_tables without service: expected IsError=true, got %s", text)
+		}
+		if !strings.Contains(text, "Available services: ["+mcpRBACService+"]") {
+			t.Errorf("faucet_list_tables without service lacks hint: %s", text)
+		}
+
+		res, text = callTool(t, ctx, c, "faucet_list_tables", map[string]interface{}{"service": "nope"})
+		if !res.IsError {
+			t.Fatalf("faucet_list_tables(nope): expected IsError=true, got %s", text)
+		}
+		if !strings.Contains(text, "Available services: ["+mcpRBACService+"]") {
+			t.Errorf("faucet_list_tables(nope) lacks hint: %s", text)
+		}
+	})
+}
+
+func TestMCPEndpoint_E2E_ReadOnlyServiceRefusesWrites(t *testing.T) {
+	env := setupMCPRBACEnv(t)
+	ctx := context.Background()
+
+	// Flip the service to read-only with raw SQL enabled: an all-verbs key
+	// must still be unable to mutate anything through any tool.
+	svc, err := env.store.GetServiceByName(ctx, mcpRBACService)
+	if err != nil {
+		t.Fatalf("GetServiceByName: %v", err)
+	}
+	svc.ReadOnly = true
+	svc.RawSQL = true
+	if err := env.store.UpdateService(ctx, svc); err != nil {
+		t.Fatalf("UpdateService: %v", err)
+	}
+
+	fullKey := createRoleWithKey(t, env, "mcp-writer-ro", "faucet_mcp_rbac_writer_ro_key_01", []model.RoleAccess{
+		{ServiceName: "*", Component: "*", VerbMask: model.VerbAll},
+	})
+
+	ts := httptest.NewServer(env.server.Router())
+	t.Cleanup(ts.Close)
+
+	callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	c := newMCPAPIKeyClient(t, callCtx, ts.URL, fullKey)
+
+	calls := []struct {
+		tool string
+		args map[string]interface{}
+	}{
+		{"faucet_raw_sql", map[string]interface{}{"service": mcpRBACService, "sql": "DELETE FROM users"}},
+		{"faucet_raw_sql", map[string]interface{}{"service": mcpRBACService, "sql": "DROP TABLE users"}},
+		{"faucet_insert", map[string]interface{}{
+			"service": mcpRBACService, "table": "users",
+			"records": []interface{}{map[string]interface{}{"name": "Bob", "email": "bob@example.com"}},
+		}},
+		{"faucet_update", map[string]interface{}{
+			"service": mcpRBACService, "table": "users", "filter": "id = 1",
+			"record": map[string]interface{}{"name": "Mallory"},
+		}},
+		{"faucet_delete", map[string]interface{}{"service": mcpRBACService, "table": "users", "filter": "id = 1"}},
+	}
+	for _, call := range calls {
+		res, text := callTool(t, callCtx, c, call.tool, call.args)
+		if !res.IsError {
+			t.Fatalf("%s on read-only service: expected IsError=true, got %s", call.tool, text)
+		}
+		if !strings.Contains(text, "read-only") {
+			t.Errorf("%s error text = %q, want it to mention read-only", call.tool, text)
+		}
+	}
+
+	// Reads still work, and nothing changed.
+	res, text := callTool(t, callCtx, c, "faucet_query", map[string]interface{}{"service": mcpRBACService, "table": "users"})
+	if res.IsError {
+		t.Fatalf("faucet_query on read-only service: unexpected error: %s", text)
+	}
+	if !strings.Contains(text, "Alice") || strings.Contains(text, "Mallory") {
+		t.Errorf("faucet_query result changed on read-only service: %s", text)
+	}
+	conn, _ := env.registry.Get(mcpRBACService)
+	var n int
+	if err := conn.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&n); err != nil {
+		t.Fatalf("count users: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("users row count = %d after refused writes, want 1", n)
+	}
+}

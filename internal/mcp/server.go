@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -77,9 +79,24 @@ func (s *MCPServer) Server() *server.MCPServer {
 // an admin principal and RBAC rules are bypassed.
 func (s *MCPServer) ServeStdio() error {
 	s.logger.Info("starting MCP server in stdio mode with local admin privileges (RBAC bypassed)")
-	return server.ServeStdio(s.server, server.WithStdioContextFunc(func(ctx context.Context) context.Context {
-		return rbac.WithPrincipal(ctx, &rbac.Principal{Type: rbac.PrincipalAdmin, IsAdmin: true})
-	}))
+	return s.newStdioServer().Listen(context.Background(), os.Stdin, os.Stdout)
+}
+
+// newStdioServer builds the stdio transport for this server. The returned
+// transport injects an admin principal into every request context, so all
+// tool calls and resource reads made over it bypass RBAC (see ServeStdio).
+// It is separated from ServeStdio so tests can drive Listen over in-memory
+// pipes.
+func (s *MCPServer) newStdioServer() *server.StdioServer {
+	stdio := server.NewStdioServer(s.server)
+	stdio.SetContextFunc(stdioAdminContext)
+	return stdio
+}
+
+// stdioAdminContext attaches an admin principal to ctx. It is the context
+// function installed on the stdio transport.
+func stdioAdminContext(ctx context.Context) context.Context {
+	return rbac.WithPrincipal(ctx, &rbac.Principal{Type: rbac.PrincipalAdmin, IsAdmin: true})
 }
 
 // HTTPHandler returns an http.Handler implementing the Streamable HTTP MCP
@@ -162,6 +179,43 @@ func (s *MCPServer) visibleServices(ctx context.Context) ([]model.ServiceConfig,
 		}
 	}
 	return visible, nil
+}
+
+// serviceHint returns a suffix such as " Available services: [a b]" naming
+// the services the principal carried by ctx may see, for appending to
+// error messages so an LLM client can self-correct. It never names a
+// service the caller's role cannot access: when the visible list is empty
+// or cannot be determined it returns "" so no hint is given.
+func (s *MCPServer) serviceHint(ctx context.Context) string {
+	services, err := s.visibleServices(ctx)
+	if err != nil || len(services) == 0 {
+		return ""
+	}
+	names := make([]string, len(services))
+	for i, svc := range services {
+		names[i] = svc.Name
+	}
+	return " Available services: [" + strings.Join(names, " ") + "]"
+}
+
+// writableService loads the service configuration for serviceName and
+// refuses the operation when the service is flagged read_only. refusal is
+// the sentence appended to the read-only error, e.g. "Insert operations are
+// not permitted.". It fails closed: a config store error other than
+// "not found" is reported as an authorization failure rather than treated
+// as writable. The second return value is nil when the operation may
+// proceed; otherwise it is the tool error result to return to the caller.
+func (s *MCPServer) writableService(ctx context.Context, serviceName, refusal string) (*model.ServiceConfig, *mcp.CallToolResult) {
+	svc, err := s.store.GetServiceByName(ctx, serviceName)
+	switch {
+	case errors.Is(err, config.ErrNotFound):
+		return nil, mcp.NewToolResultError(fmt.Sprintf("Service %q not found.%s", serviceName, s.serviceHint(ctx)))
+	case err != nil:
+		return nil, mcp.NewToolResultError(fmt.Sprintf("Authorization check failed: %v", err))
+	case svc.ReadOnly:
+		return nil, mcp.NewToolResultError(fmt.Sprintf("Service %q is read-only. %s", serviceName, refusal))
+	}
+	return svc, nil
 }
 
 // toolAnnotation returns a standard ToolAnnotation for read-only vs

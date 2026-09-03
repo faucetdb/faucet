@@ -123,8 +123,8 @@ func (s *MCPServer) handleSchemaResource(
 
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return nil, fmt.Errorf("service %q not found: %w (available: %v)",
-			serviceName, err, s.registry.ListServices())
+		return nil, fmt.Errorf("service %q not found: %w.%s",
+			serviceName, err, s.serviceHint(ctx))
 	}
 
 	schema, err := conn.IntrospectSchema(ctx)

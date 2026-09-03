@@ -216,9 +216,10 @@ func (s *MCPServer) registerTools(srv *server.MCPServer) {
 					"to check which services allow raw SQL. Because arbitrary SQL can touch "+
 					"any object, it requires a role rule granting all verbs (GET, POST, PUT, "+
 					"PATCH, DELETE) on the _sql component of the service.\n\n"+
-					"The query is executed read-only by default. Parameters should be "+
-					"passed as an array and referenced with positional placeholders "+
-					"($1, $2 for PostgreSQL; ?, ? for MySQL).",
+					"The statement is executed as-is and may modify data; it is refused "+
+					"on services flagged read_only. Parameters should be passed as an "+
+					"array and referenced with positional placeholders ($1, $2 for "+
+					"PostgreSQL; ?, ? for MySQL).",
 			),
 			mcp.WithToolAnnotation(readOnlyAnnotation()),
 			mcp.WithString("service",
@@ -295,7 +296,7 @@ func (s *MCPServer) handleListTables(
 
 	serviceName, err := requireString(request, "service")
 	if err != nil {
-		return toolError("%v. Available services: %v", err, s.registry.ListServices())
+		return toolError("%v.%s", err, s.serviceHint(ctx))
 	}
 
 	if denied := s.authorize(ctx, serviceName, "_table", model.VerbGet); denied != nil {
@@ -304,8 +305,7 @@ func (s *MCPServer) handleListTables(
 
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not found. Available services: %v",
-			serviceName, s.registry.ListServices())
+		return toolError("Service %q not found.%s", serviceName, s.serviceHint(ctx))
 	}
 
 	schema, err := conn.IntrospectSchema(ctx)
@@ -370,7 +370,7 @@ func (s *MCPServer) handleDescribeTable(
 
 	serviceName, err := requireString(request, "service")
 	if err != nil {
-		return toolError("%v. Available services: %v", err, s.registry.ListServices())
+		return toolError("%v.%s", err, s.serviceHint(ctx))
 	}
 	tableName, err := requireString(request, "table")
 	if err != nil {
@@ -383,8 +383,7 @@ func (s *MCPServer) handleDescribeTable(
 
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not found. Available services: %v",
-			serviceName, s.registry.ListServices())
+		return toolError("Service %q not found.%s", serviceName, s.serviceHint(ctx))
 	}
 
 	table, err := conn.IntrospectTable(ctx, tableName)
@@ -406,11 +405,15 @@ func (s *MCPServer) handleQuery(
 
 	serviceName, err := requireString(request, "service")
 	if err != nil {
-		return toolError("%v. Available services: %v", err, s.registry.ListServices())
+		return toolError("%v.%s", err, s.serviceHint(ctx))
 	}
 	tableName, err := requireString(request, "table")
 	if err != nil {
 		return toolError("%v", err)
+	}
+
+	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbGet); denied != nil {
+		return denied, nil
 	}
 
 	filterStr := optionalString(request, "filter")
@@ -423,14 +426,9 @@ func (s *MCPServer) handleQuery(
 		offset = 0
 	}
 
-	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbGet); denied != nil {
-		return denied, nil
-	}
-
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not found. Available services: %v",
-			serviceName, s.registry.ListServices())
+		return toolError("Service %q not found.%s", serviceName, s.serviceHint(ctx))
 	}
 
 	// Parse the projection (plain columns and/or aggregates).
@@ -552,7 +550,7 @@ func (s *MCPServer) handleInsert(
 
 	serviceName, err := requireString(request, "service")
 	if err != nil {
-		return toolError("%v. Available services: %v", err, s.registry.ListServices())
+		return toolError("%v.%s", err, s.serviceHint(ctx))
 	}
 	tableName, err := requireString(request, "table")
 	if err != nil {
@@ -563,10 +561,8 @@ func (s *MCPServer) handleInsert(
 		return denied, nil
 	}
 
-	// Check read-only status.
-	svc, err := s.store.GetServiceByName(ctx, serviceName)
-	if err == nil && svc.ReadOnly {
-		return toolError("Service %q is read-only. Insert operations are not permitted.", serviceName)
+	if _, denied := s.writableService(ctx, serviceName, "Insert operations are not permitted."); denied != nil {
+		return denied, nil
 	}
 
 	records := getObjectSliceArg(request, "records")
@@ -577,8 +573,7 @@ func (s *MCPServer) handleInsert(
 
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not found. Available services: %v",
-			serviceName, s.registry.ListServices())
+		return toolError("Service %q not found.%s", serviceName, s.serviceHint(ctx))
 	}
 
 	insertReq := connector.InsertRequest{
@@ -648,26 +643,23 @@ func (s *MCPServer) handleUpdate(
 
 	serviceName, err := requireString(request, "service")
 	if err != nil {
-		return toolError("%v. Available services: %v", err, s.registry.ListServices())
+		return toolError("%v.%s", err, s.serviceHint(ctx))
 	}
 	tableName, err := requireString(request, "table")
 	if err != nil {
 		return toolError("%v", err)
 	}
+	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbPatch); denied != nil {
+		return denied, nil
+	}
+	if _, denied := s.writableService(ctx, serviceName, "Update operations are not permitted."); denied != nil {
+		return denied, nil
+	}
+
 	filterStr, err := requireString(request, "filter")
 	if err != nil {
 		return toolError("A filter is required for update operations to prevent " +
 			"accidental full-table updates. Example: id = 42")
-	}
-
-	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbPatch); denied != nil {
-		return denied, nil
-	}
-
-	// Check read-only status.
-	svc, err := s.store.GetServiceByName(ctx, serviceName)
-	if err == nil && svc.ReadOnly {
-		return toolError("Service %q is read-only. Update operations are not permitted.", serviceName)
 	}
 
 	record := getObjectArg(request, "record")
@@ -678,8 +670,7 @@ func (s *MCPServer) handleUpdate(
 
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not found. Available services: %v",
-			serviceName, s.registry.ListServices())
+		return toolError("Service %q not found.%s", serviceName, s.serviceHint(ctx))
 	}
 
 	// Parse filter with startIndex offset past the SET columns so that
@@ -759,32 +750,28 @@ func (s *MCPServer) handleDelete(
 
 	serviceName, err := requireString(request, "service")
 	if err != nil {
-		return toolError("%v. Available services: %v", err, s.registry.ListServices())
+		return toolError("%v.%s", err, s.serviceHint(ctx))
 	}
 	tableName, err := requireString(request, "table")
 	if err != nil {
 		return toolError("%v", err)
 	}
+	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbDelete); denied != nil {
+		return denied, nil
+	}
+	if _, denied := s.writableService(ctx, serviceName, "Delete operations are not permitted."); denied != nil {
+		return denied, nil
+	}
+
 	filterStr, err := requireString(request, "filter")
 	if err != nil {
 		return toolError("A filter is required for delete operations to prevent " +
 			"accidental full-table deletes. Example: id = 42")
 	}
 
-	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbDelete); denied != nil {
-		return denied, nil
-	}
-
-	// Check read-only status.
-	svc, err := s.store.GetServiceByName(ctx, serviceName)
-	if err == nil && svc.ReadOnly {
-		return toolError("Service %q is read-only. Delete operations are not permitted.", serviceName)
-	}
-
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not found. Available services: %v",
-			serviceName, s.registry.ListServices())
+		return toolError("Service %q not found.%s", serviceName, s.serviceHint(ctx))
 	}
 
 	// Parse filter.
@@ -835,8 +822,26 @@ func (s *MCPServer) handleRawSQL(
 
 	serviceName, err := requireString(request, "service")
 	if err != nil {
-		return toolError("%v. Available services: %v", err, s.registry.ListServices())
+		return toolError("%v.%s", err, s.serviceHint(ctx))
 	}
+	// Arbitrary SQL can read or modify anything in the service, so it needs
+	// a rule granting every verb on the "_sql" component.
+	if denied := s.authorize(ctx, serviceName, "_sql", model.VerbAll); denied != nil {
+		return denied, nil
+	}
+
+	// Raw SQL cannot be proven read-only, so a read_only service refuses it
+	// outright; the service must also have raw_sql_allowed enabled.
+	svc, denied := s.writableService(ctx, serviceName, "Raw SQL is not permitted.")
+	if denied != nil {
+		return denied, nil
+	}
+	if !svc.RawSQL {
+		return toolError("Raw SQL is not enabled for service %q. "+
+			"Use the structured query tools (faucet_query, faucet_insert, etc.) instead, "+
+			"or ask the administrator to enable raw_sql_allowed for this service.", serviceName)
+	}
+
 	sqlStr, err := requireString(request, "sql")
 	if err != nil {
 		return toolError("%v", err)
@@ -846,28 +851,9 @@ func (s *MCPServer) handleRawSQL(
 	timeoutSec := optionalInt(request, "timeout", 30)
 	limit := clamp(optionalInt(request, "limit", 100), 1, 10000)
 
-	// Arbitrary SQL can read or modify anything in the service, so it needs
-	// a rule granting every verb on the "_sql" component.
-	if denied := s.authorize(ctx, serviceName, "_sql", model.VerbAll); denied != nil {
-		return denied, nil
-	}
-
-	// Check that the service allows raw SQL.
-	svc, err := s.store.GetServiceByName(ctx, serviceName)
-	if err != nil {
-		return toolError("Service %q not found. Available services: %v",
-			serviceName, s.registry.ListServices())
-	}
-	if !svc.RawSQL {
-		return toolError("Raw SQL is not enabled for service %q. "+
-			"Use the structured query tools (faucet_query, faucet_insert, etc.) instead, "+
-			"or ask the administrator to enable raw_sql_allowed for this service.", serviceName)
-	}
-
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not connected. Available services: %v",
-			serviceName, s.registry.ListServices())
+		return toolError("Service %q not connected.%s", serviceName, s.serviceHint(ctx))
 	}
 
 	// Apply timeout.
