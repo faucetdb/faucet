@@ -3,11 +3,15 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+
+	"github.com/faucetdb/faucet/internal/model"
+	"github.com/faucetdb/faucet/internal/rbac"
 )
 
 // registerResources adds MCP resource definitions to the server. Resources
@@ -22,8 +26,9 @@ func (s *MCPServer) registerResources(srv *server.MCPServer) {
 			"faucet://services",
 			"Connected Database Services",
 			mcp.WithResourceDescription(
-				"List of all database services configured in Faucet, "+
-					"including their driver type and active status.",
+				"List of the database services configured in Faucet that the "+
+					"caller's role has access to, including their driver type and "+
+					"active status.",
 			),
 			mcp.WithMIMEType("application/json"),
 		),
@@ -39,7 +44,8 @@ func (s *MCPServer) registerResources(srv *server.MCPServer) {
 			"Database Schema",
 			mcp.WithTemplateDescription(
 				"Full schema introspection for a database service, "+
-					"including tables, columns, primary keys, foreign keys, and indexes.",
+					"including tables, columns, primary keys, foreign keys, and indexes. "+
+					"Requires GET permission on _schema.",
 			),
 			mcp.WithTemplateMIMEType("application/json"),
 		),
@@ -47,14 +53,19 @@ func (s *MCPServer) registerResources(srv *server.MCPServer) {
 	)
 }
 
-// handleServicesResource returns a JSON list of all configured services.
+// handleServicesResource returns a JSON list of the configured services the
+// calling principal may access. It returns an error (wrapping
+// rbac.ErrForbidden) when the caller is unauthenticated or has no usable role.
 func (s *MCPServer) handleServicesResource(
 	ctx context.Context,
 	request mcp.ReadResourceRequest,
 ) ([]mcp.ResourceContents, error) {
 
-	services, err := s.store.ListServices(ctx)
+	services, err := s.visibleServices(ctx)
 	if err != nil {
+		if errors.Is(err, rbac.ErrForbidden) {
+			return nil, resourceAuthError(err)
+		}
 		return nil, fmt.Errorf("failed to list services: %w", err)
 	}
 
@@ -106,6 +117,10 @@ func (s *MCPServer) handleSchemaResource(
 		return nil, fmt.Errorf("invalid schema URI %q: expected faucet://schema/{service}", uri)
 	}
 
+	if err := s.enforcer.Authorize(ctx, rbac.PrincipalFromContext(ctx), serviceName, "_schema", model.VerbGet); err != nil {
+		return nil, resourceAuthError(err)
+	}
+
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
 		return nil, fmt.Errorf("service %q not found: %w (available: %v)",
@@ -129,4 +144,15 @@ func (s *MCPServer) handleSchemaResource(
 			Text:     string(b),
 		},
 	}, nil
+}
+
+// resourceAuthError converts an rbac error into the error returned to the
+// MCP client for a resource read. Denials keep wrapping rbac.ErrForbidden so
+// callers can detect them with errors.Is.
+func resourceAuthError(err error) error {
+	var denial *rbac.Denial
+	if errors.As(err, &denial) {
+		return fmt.Errorf("forbidden: %s: %w", denial.Reason, rbac.ErrForbidden)
+	}
+	return fmt.Errorf("authorization check failed: %w", err)
 }
