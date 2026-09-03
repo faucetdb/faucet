@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
@@ -98,9 +97,12 @@ func runMCP(transport string, port int) error {
 		return mcpSrv.ServeStdio()
 	case "http":
 		addr := fmt.Sprintf(":%d", port)
-		jwtSecret := viper.GetString("auth.jwt_secret")
-		if jwtSecret == "" {
-			jwtSecret = "faucet-dev-secret-change-me"
+		// Resolve the same secret the main server uses so that admin
+		// tokens issued by "faucet serve" verify here when both share a
+		// data directory.
+		jwtSecret, err := resolveJWTSecret(context.Background(), store, logger)
+		if err != nil {
+			return fmt.Errorf("resolve jwt secret: %w", err)
 		}
 		authSvc := service.NewAuthService(store, jwtSecret)
 

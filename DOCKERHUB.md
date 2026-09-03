@@ -27,7 +27,8 @@ docker exec faucet faucet db add mydb \
   --driver postgres \
   --dsn "postgres://user:pass@host:5432/mydb?sslmode=disable"
 
-# Create an API key
+# Create a role (GET-only on every service) and an API key bound to it
+docker exec faucet faucet role create --name default --verbs GET
 docker exec faucet faucet key create --role default
 
 # Query your data
@@ -113,6 +114,8 @@ services:
     ports:
       - "8080:8080"
     environment:
+      # Optional: pin the JWT signing secret. If unset, Faucet generates one
+      # on first start and stores it in the /data volume.
       FAUCET_AUTH_JWT_SECRET: change-me-in-production
     volumes:
       - faucet_data:/data
@@ -149,7 +152,7 @@ volumes:
 |----------|---------|-------------|
 | `FAUCET_SERVER_HOST` | `0.0.0.0` | Bind address |
 | `FAUCET_SERVER_PORT` | `8080` | HTTP port |
-| `FAUCET_AUTH_JWT_SECRET` | *(auto-generated)* | JWT signing secret — **set this in production** |
+| `FAUCET_AUTH_JWT_SECRET` | *(generated on first start)* | JWT signing secret for admin sessions. If unset, a random 256-bit secret is generated once and stored in the `/data` volume, so it survives restarts but not a volume wipe. Set it explicitly to pin the secret across hosts or replicas. `FAUCET_JWT_SECRET` is accepted as an alias. |
 | `FAUCET_AUTH_JWT_EXPIRY` | `1h` | JWT token lifetime |
 | `FAUCET_AUTH_API_KEY_HEADER` | `X-API-Key` | Header name for API key auth |
 | `FAUCET_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
@@ -227,7 +230,9 @@ docker exec faucet faucet db list           # List databases
 docker exec faucet faucet db test NAME      # Test connectivity
 docker exec faucet faucet db schema NAME    # Dump schema as JSON
 docker exec faucet faucet key create        # Create API key
-docker exec faucet faucet role create       # Create RBAC role
+docker exec faucet faucet role create       # Create RBAC role (use --verbs to grant access)
+docker exec faucet faucet role grant        # Add an access rule to an existing role
+docker exec faucet faucet role list         # List roles and their access rules
 docker exec faucet faucet admin create      # Create admin account
 docker exec faucet faucet mcp              # Start MCP server (stdio)
 docker exec faucet faucet openapi          # Generate OpenAPI spec
@@ -261,7 +266,7 @@ Faucet is built for speed:
 
 ## Production Checklist
 
-- [ ] Set `FAUCET_AUTH_JWT_SECRET` to a strong random value
+- [ ] Set `FAUCET_AUTH_JWT_SECRET` to a strong random value (otherwise one is generated and stored in `/data`; back up the volume or pin it)
 - [ ] Use a specific image tag instead of `:latest`
 - [ ] Mount `/data` to a persistent volume
 - [ ] Put behind a reverse proxy (nginx, Caddy, Traefik) with TLS

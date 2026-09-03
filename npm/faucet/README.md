@@ -31,7 +31,8 @@ npx @faucetdb/faucet serve
 npx @faucetdb/faucet db add --name mydb --driver postgres \
   --dsn "postgres://user:pass@localhost/mydb?sslmode=disable"
 
-# Create an API key
+# Create a role (GET-only on every service) and an API key bound to it
+npx @faucetdb/faucet role create --name default --verbs GET
 npx @faucetdb/faucet key create --role default
 
 # Query your data
