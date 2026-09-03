@@ -788,6 +788,14 @@ func newResponses(statusCode, description string, schema *openapi3.SchemaRef) *o
 		},
 	})
 
+	forbiddenDesc := "Forbidden: the API key's role does not permit this verb on this service/component, or the service is read-only"
+	responses.Set("403", &openapi3.ResponseRef{
+		Value: &openapi3.Response{
+			Description: &forbiddenDesc,
+			Content:     openapi3.NewContentWithJSONSchemaRef(errorRef),
+		},
+	})
+
 	notFoundDesc := "Not found"
 	responses.Set("404", &openapi3.ResponseRef{
 		Value: &openapi3.Response{
