@@ -155,10 +155,16 @@ func ReadOnlyGuard(store *config.Store) func(http.Handler) http.Handler {
 			}
 			serviceName := chi.URLParam(r, "serviceName")
 			svc, err := store.GetServiceByName(r.Context(), serviceName)
-			if err == nil && svc.ReadOnly {
+			switch {
+			case err == nil && svc.ReadOnly:
 				writeAuthError(w, http.StatusForbidden,
 					"Service "+serviceName+" is read-only; "+r.Method+" is not permitted",
 					map[string]interface{}{"service": serviceName, "verb": r.Method})
+				return
+			case err != nil && !errors.Is(err, config.ErrNotFound):
+				// Fail closed: if the config store cannot be read we cannot
+				// prove the service is writable.
+				writeAuthError(w, http.StatusInternalServerError, "Authorization check failed", nil)
 				return
 			}
 			// Unknown services fall through to the handler, which returns 404.
@@ -177,10 +183,7 @@ func routeComponent(r *http.Request) string {
 	if p == "" {
 		// Fallback for handlers mounted outside a chi sub-router: strip the
 		// "/api/v1/{serviceName}" prefix from the request path.
-		p = r.URL.Path
-		if i := strings.Index(p, "/"+chi.URLParam(r, "serviceName")+"/"); i >= 0 {
-			p = p[i+len(chi.URLParam(r, "serviceName"))+1:]
-		}
+		p = strings.TrimPrefix(r.URL.Path, "/api/v1/"+chi.URLParam(r, "serviceName"))
 	}
 	if unescaped, err := url.PathUnescape(p); err == nil {
 		p = unescaped

@@ -120,7 +120,8 @@ func VerbNames(mask int) []string {
 
 // ParseVerbs converts a comma-separated list of HTTP method names into a
 // verb mask. "*" and "all" (case-insensitive) expand to every verb.
-// Whitespace around names is ignored.
+// Whitespace around names is ignored. An empty result is an error, so a
+// caller can never accidentally persist a rule that grants nothing.
 func ParseVerbs(spec string) (int, error) {
 	mask := 0
 	for _, raw := range strings.Split(spec, ",") {
@@ -136,6 +137,9 @@ func ParseVerbs(spec string) (int, error) {
 			return 0, fmt.Errorf("unknown verb %q (expected GET, POST, PUT, PATCH, DELETE or *)", strings.TrimSpace(raw))
 		}
 		mask |= bit
+	}
+	if mask == 0 {
+		return 0, errors.New("no verbs specified (expected GET, POST, PUT, PATCH, DELETE or *)")
 	}
 	return mask, nil
 }

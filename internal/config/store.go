@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -446,6 +447,17 @@ func (s *Store) SetRoleAccess(ctx context.Context, roleID int64, access []model.
 
 	for _, a := range access {
 		a.RoleID = roleID
+		// Empty patterns mean "everything"; store them explicitly as "*"
+		// so the stored rule reads the way it is enforced.
+		if strings.TrimSpace(a.ServiceName) == "" {
+			a.ServiceName = "*"
+		}
+		if strings.TrimSpace(a.Component) == "" {
+			a.Component = "*"
+		}
+		if a.FilterOp == "" {
+			a.FilterOp = "AND"
+		}
 		row, err := roleAccessRowFromModel(a)
 		if err != nil {
 			return err

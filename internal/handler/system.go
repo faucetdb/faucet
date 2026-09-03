@@ -572,7 +572,12 @@ func (h *SystemHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var updates model.Role
+	var updates struct {
+		Name        string             `json:"name"`
+		Description string             `json:"description"`
+		IsActive    *bool              `json:"is_active"`
+		Access      []model.RoleAccess `json:"access"`
+	}
 	if err := readJSON(r, &updates); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
@@ -584,7 +589,12 @@ func (h *SystemHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	if updates.Description != "" {
 		existing.Description = updates.Description
 	}
-	existing.IsActive = updates.IsActive
+	// Only touch is_active when the client sent it. Now that access rules
+	// are enforced, an omitted field must not silently deactivate the role
+	// (which would 403 every key bound to it).
+	if updates.IsActive != nil {
+		existing.IsActive = *updates.IsActive
+	}
 
 	if err := h.store.UpdateRole(r.Context(), existing); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update role: "+err.Error())
