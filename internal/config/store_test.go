@@ -221,11 +221,11 @@ func TestAPIKeyCRUD(t *testing.T) {
 	hash := HashAPIKey(rawKey)
 
 	key := &model.APIKey{
-		KeyHash:  hash,
+		KeyHash:   hash,
 		KeyPrefix: rawKey[:8],
-		Label:    "Test Key",
-		RoleID:   role.ID,
-		IsActive: true,
+		Label:     "Test Key",
+		RoleID:    role.ID,
+		IsActive:  true,
 	}
 	if err := s.CreateAPIKey(ctx, key); err != nil {
 		t.Fatalf("CreateAPIKey: %v", err)
@@ -548,5 +548,109 @@ func TestPoolConfigRoundTrip(t *testing.T) {
 	}
 	if got.Pool.ConnMaxLifetime != 10*time.Minute {
 		t.Errorf("ConnMaxLifetime: got %v, want 10m", got.Pool.ConnMaxLifetime)
+	}
+}
+
+func TestSetRoleAccess_NormalizesEmptyPatterns(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	role := &model.Role{Name: "normalized", IsActive: true}
+	if err := s.CreateRole(ctx, role); err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	// Empty service/component mean "everything" and an empty filter_op
+	// means AND; the stored rule must say so explicitly.
+	err := s.SetRoleAccess(ctx, role.ID, []model.RoleAccess{
+		{ServiceName: "", Component: "", VerbMask: model.VerbGet},
+		{ServiceName: "   ", Component: " ", VerbMask: model.VerbPost, FilterOp: "OR"},
+	})
+	if err != nil {
+		t.Fatalf("SetRoleAccess: %v", err)
+	}
+
+	got, err := s.GetRoleAccess(ctx, role.ID)
+	if err != nil {
+		t.Fatalf("GetRoleAccess: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d rules, want 2", len(got))
+	}
+	for i, a := range got {
+		if a.ID == 0 {
+			t.Errorf("rule %d: ID = 0, want assigned", i)
+		}
+		if a.RoleID != role.ID {
+			t.Errorf("rule %d: RoleID = %d, want %d", i, a.RoleID, role.ID)
+		}
+		if a.ServiceName != "*" {
+			t.Errorf("rule %d: ServiceName = %q, want \"*\"", i, a.ServiceName)
+		}
+		if a.Component != "*" {
+			t.Errorf("rule %d: Component = %q, want \"*\"", i, a.Component)
+		}
+	}
+	if got[0].FilterOp != "AND" {
+		t.Errorf("rule 0: FilterOp = %q, want AND (default)", got[0].FilterOp)
+	}
+	if got[1].FilterOp != "OR" {
+		t.Errorf("rule 1: FilterOp = %q, want OR (explicit value preserved)", got[1].FilterOp)
+	}
+}
+
+// TestNewStore_FilePragmas verifies that the DSN pragmas are actually
+// applied by modernc.org/sqlite (the go-sqlite3 "_journal_mode=WAL" syntax
+// was silently ignored).
+func TestNewStore_FilePragmas(t *testing.T) {
+	s, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	var journal string
+	if err := s.db.Get(&journal, "PRAGMA journal_mode"); err != nil {
+		t.Fatalf("PRAGMA journal_mode: %v", err)
+	}
+	if journal != "wal" {
+		t.Errorf("journal_mode = %q, want wal", journal)
+	}
+
+	var busy int
+	if err := s.db.Get(&busy, "PRAGMA busy_timeout"); err != nil {
+		t.Fatalf("PRAGMA busy_timeout: %v", err)
+	}
+	if busy != 5000 {
+		t.Errorf("busy_timeout = %d, want 5000", busy)
+	}
+
+	// synchronous: 1 == NORMAL
+	var sync int
+	if err := s.db.Get(&sync, "PRAGMA synchronous"); err != nil {
+		t.Fatalf("PRAGMA synchronous: %v", err)
+	}
+	if sync != 1 {
+		t.Errorf("synchronous = %d, want 1 (NORMAL)", sync)
+	}
+
+	var fk int
+	if err := s.db.Get(&fk, "PRAGMA foreign_keys"); err != nil {
+		t.Fatalf("PRAGMA foreign_keys: %v", err)
+	}
+	if fk != 1 {
+		t.Errorf("foreign_keys = %d, want 1", fk)
+	}
+}
+
+func TestNewStore_MemoryPragmas(t *testing.T) {
+	s := newTestStore(t)
+
+	var busy int
+	if err := s.db.Get(&busy, "PRAGMA busy_timeout"); err != nil {
+		t.Fatalf("PRAGMA busy_timeout: %v", err)
+	}
+	if busy != 5000 {
+		t.Errorf("busy_timeout = %d, want 5000", busy)
 	}
 }

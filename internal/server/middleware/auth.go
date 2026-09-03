@@ -2,26 +2,27 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/faucetdb/faucet/internal/config"
+	"github.com/faucetdb/faucet/internal/model"
+	"github.com/faucetdb/faucet/internal/rbac"
 	"github.com/faucetdb/faucet/internal/service"
 )
 
-type contextKeyAuth string
-
-const (
-	// AuthPrincipalKey is the context key for the authenticated principal.
-	AuthPrincipalKey contextKeyAuth = "auth_principal"
-)
+// AuthPrincipalKey is the context key for the authenticated principal.
+// It is shared with the rbac package so that non-HTTP consumers (the MCP
+// server) can read the same principal.
+const AuthPrincipalKey = rbac.PrincipalContextKey
 
 // Principal represents the authenticated identity making the request.
-type Principal struct {
-	Type    string // "admin" or "api_key"
-	AdminID int64
-	RoleID  int64
-	IsAdmin bool
-}
+type Principal = rbac.Principal
 
 // Authenticate returns an HTTP middleware that validates the request's
 // authentication credentials. It supports two methods:
@@ -41,11 +42,12 @@ func Authenticate(authSvc *service.AuthService) func(http.Handler) http.Handler 
 			if apiKey != "" {
 				p, err := authSvc.ValidateAPIKey(r.Context(), apiKey)
 				if err != nil {
-					writeAuthError(w, http.StatusUnauthorized, "Invalid API key")
+					writeAuthError(w, http.StatusUnauthorized, "Invalid API key", nil)
 					return
 				}
 				principal = &Principal{
-					Type:   "api_key",
+					Type:   rbac.PrincipalAPIKey,
+					KeyID:  p.KeyID,
 					RoleID: p.RoleID,
 				}
 			}
@@ -57,11 +59,11 @@ func Authenticate(authSvc *service.AuthService) func(http.Handler) http.Handler 
 					token := strings.TrimPrefix(authHeader, "Bearer ")
 					p, err := authSvc.ValidateJWT(r.Context(), token)
 					if err != nil {
-						writeAuthError(w, http.StatusUnauthorized, "Invalid token")
+						writeAuthError(w, http.StatusUnauthorized, "Invalid token", nil)
 						return
 					}
 					principal = &Principal{
-						Type:    "admin",
+						Type:    rbac.PrincipalAdmin,
 						AdminID: p.AdminID,
 						IsAdmin: true,
 					}
@@ -70,11 +72,11 @@ func Authenticate(authSvc *service.AuthService) func(http.Handler) http.Handler 
 
 			if principal == nil {
 				writeAuthError(w, http.StatusUnauthorized,
-					"Authentication required. Provide X-API-Key header or Bearer token.")
+					"Authentication required. Provide X-API-Key header or Bearer token.", nil)
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), AuthPrincipalKey, principal)
+			ctx := rbac.WithPrincipal(r.Context(), principal)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -87,7 +89,7 @@ func RequireAdmin() func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			principal := GetPrincipal(r.Context())
 			if principal == nil || !principal.IsAdmin {
-				writeAuthError(w, http.StatusForbidden, "Admin access required")
+				writeAuthError(w, http.StatusForbidden, "Admin access required", nil)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -95,29 +97,114 @@ func RequireAdmin() func(http.Handler) http.Handler {
 	}
 }
 
+// RequireAccess returns an HTTP middleware that enforces the role-based
+// access rules (service, component, verb_mask) bound to an API key.
+//
+// It must be mounted inside the "/{serviceName}" route group, after
+// Authenticate: the service name is read from the route parameter and the
+// component (e.g. "_table/customers") from the remaining route path.
+// Admin principals bypass the check. Requests are refused with 403 when the
+// role is missing, inactive, has no matching rule, or the rule's verb_mask
+// does not include the request method.
+func RequireAccess(enforcer *rbac.Enforcer) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			principal := GetPrincipal(r.Context())
+			if principal == nil {
+				writeAuthError(w, http.StatusUnauthorized,
+					"Authentication required. Provide X-API-Key header or Bearer token.", nil)
+				return
+			}
+			if principal.IsAdmin {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			serviceName := chi.URLParam(r, "serviceName")
+			component := routeComponent(r)
+			verb, ok := rbac.VerbFromMethod(r.Method)
+			if !ok {
+				writeAuthError(w, http.StatusForbidden, "Method not permitted: "+r.Method, nil)
+				return
+			}
+
+			if err := enforcer.Authorize(r.Context(), principal, serviceName, component, verb); err != nil {
+				var d *rbac.Denial
+				if errors.As(err, &d) {
+					writeAuthError(w, http.StatusForbidden, d.Reason, d.Context())
+					return
+				}
+				// Fail closed on unexpected errors (e.g. config store failure).
+				writeAuthError(w, http.StatusInternalServerError, "Authorization check failed", nil)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// ReadOnlyGuard returns an HTTP middleware that rejects every non-GET/HEAD
+// request to a service flagged read_only, regardless of the principal's
+// role. It must be mounted inside the "/{serviceName}" route group.
+func ReadOnlyGuard(store *config.Store) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				next.ServeHTTP(w, r)
+				return
+			}
+			serviceName := chi.URLParam(r, "serviceName")
+			svc, err := store.GetServiceByName(r.Context(), serviceName)
+			switch {
+			case err == nil && svc.ReadOnly:
+				writeAuthError(w, http.StatusForbidden,
+					"Service "+serviceName+" is read-only; "+r.Method+" is not permitted",
+					map[string]interface{}{"service": serviceName, "verb": r.Method})
+				return
+			case err != nil && !errors.Is(err, config.ErrNotFound):
+				// Fail closed: if the config store cannot be read we cannot
+				// prove the service is writable.
+				writeAuthError(w, http.StatusInternalServerError, "Authorization check failed", nil)
+				return
+			}
+			// Unknown services fall through to the handler, which returns 404.
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// routeComponent derives the RBAC component ("_table/customers", "_schema",
+// ...) from the part of the URL that follows "/{serviceName}".
+func routeComponent(r *http.Request) string {
+	p := ""
+	if rctx := chi.RouteContext(r.Context()); rctx != nil {
+		p = rctx.RoutePath
+	}
+	if p == "" {
+		// Fallback for handlers mounted outside a chi sub-router: strip the
+		// "/api/v1/{serviceName}" prefix from the request path.
+		p = strings.TrimPrefix(r.URL.Path, "/api/v1/"+chi.URLParam(r, "serviceName"))
+	}
+	if unescaped, err := url.PathUnescape(p); err == nil {
+		p = unescaped
+	}
+	return rbac.NormalizeComponent(p)
+}
+
 // GetPrincipal extracts the authenticated principal from the context.
 // Returns nil if no principal is present (i.e., unauthenticated request).
 func GetPrincipal(ctx context.Context) *Principal {
-	if p, ok := ctx.Value(AuthPrincipalKey).(*Principal); ok {
-		return p
-	}
-	return nil
+	return rbac.PrincipalFromContext(ctx)
 }
 
-func writeAuthError(w http.ResponseWriter, status int, message string) {
+func writeAuthError(w http.ResponseWriter, status int, message string, ctx map[string]interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	// Manually construct JSON to avoid import cycle with handler package
-	w.Write([]byte(`{"error":{"code":` + httpStatusString(status) + `,"message":"` + message + `"}}`))
-}
-
-func httpStatusString(code int) string {
-	switch code {
-	case 401:
-		return "401"
-	case 403:
-		return "403"
-	default:
-		return "500"
-	}
+	_ = json.NewEncoder(w).Encode(model.ErrorResponse{
+		Error: model.ErrorDetail{
+			Code:    status,
+			Message: message,
+			Context: ctx,
+		},
+	})
 }

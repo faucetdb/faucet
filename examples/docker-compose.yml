@@ -12,7 +12,10 @@ services:
     volumes:
       - faucet-data:/data
     environment:
-      FAUCET_JWT_SECRET: change-me-in-production
+      # Optional. Pins the JWT signing secret for admin sessions; if unset,
+      # Faucet generates one on first start and stores it in the /data volume.
+      # FAUCET_JWT_SECRET is accepted as an alias.
+      FAUCET_AUTH_JWT_SECRET: change-me-in-production
     depends_on:
       postgres:
         condition: service_healthy

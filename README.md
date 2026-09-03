@@ -99,8 +99,8 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 ### Security & Access Control
 - **API key authentication** — SHA-256 hashed keys with per-key role assignment
 - **JWT authentication** — HMAC-SHA256 signed tokens for admin sessions
-- **Role-based access control (RBAC)** — Per-table verb permissions (GET, POST, PUT, DELETE)
-- **Row-level security filters** — Restrict data access per role with SQL filter expressions
+- **Role-based access control (RBAC)** — Per-table verb permissions (GET, POST, PUT, PATCH, DELETE)
+- **Row-level security filters** — Filter expressions are stored per access rule and returned by the API; applying them to queries is planned and not enforced yet
 - **Schema contract locking** — Lock your API contract against silent breaking schema changes with three modes (none, auto, strict), drift detection, and CLI management
 
 ### AI Agent Integration (MCP)
@@ -170,7 +170,8 @@ faucet admin create --email admin@example.com --password changeme123
 # Add a database
 faucet db add mydb --driver postgres --dsn "postgres://user:pass@localhost/mydb?sslmode=disable"
 
-# Create an API key
+# Create a role that can read every service, then an API key bound to it
+faucet role create --name default --verbs GET
 faucet key create --role default
 
 # Query your data
@@ -235,13 +236,73 @@ faucet db diff NAME             # Show schema drift
 faucet db promote NAME          # Promote contracts to match live schema
 faucet key create               # Create API key
 faucet key list                 # List API keys
-faucet role create              # Create RBAC role
+faucet role create              # Create RBAC role (--verbs grants its first rule)
+faucet role grant               # Add an access rule to a role
+faucet role list                # List roles and their rules
 faucet admin create             # Create admin account
 faucet mcp                      # Start MCP server (stdio)
 faucet openapi                  # Generate OpenAPI spec
 faucet config set KEY VALUE     # Set configuration value
 faucet version                  # Show version info
 ```
+
+### Access rules (RBAC)
+
+A role is a list of rules `{service_name, component, verb_mask}`. An API key inherits the rules of the role it is bound to; every request is checked against them. Admin JWT sessions (the dashboard and `/api/v1/system/*`) bypass RBAC.
+
+**Verb bits** — combine with bitwise OR:
+
+| Verb | Bit |
+|------|-----|
+| GET | 1 |
+| POST | 2 |
+| PUT | 4 |
+| PATCH | 8 |
+| DELETE | 16 |
+| all | 31 |
+
+**Matching** (case-sensitive — patterns must match the service and table names exactly as they appear in the URL):
+
+- `service_name`: `*` (any service), an exact name (`mydb`), or a prefix wildcard (`prod_*`)
+- `component`: `*` (anything), an exact component (`_table/customers`, `_schema`), a prefix wildcard (`_table/*` — every table *and* the `_table` listing), or a bare name (`customers`, which matches `_table/customers`, `_schema/customers`, ...)
+
+**Fail closed.** A role with no rules, a rule with `verb_mask` 0, or an inactive role denies everything with `403` and an error envelope that says why:
+
+```json
+{"error":{"code":403,"message":"Role \"readonly\" does not permit POST on mydb/_table/orders",
+          "context":{"role":"readonly","service":"mydb","component":"_table/orders","verb":"POST"}}}
+```
+
+Services flagged `read_only` reject every non-GET request regardless of role.
+
+**MCP.** Tools map onto the same verbs: `faucet_query` = GET, `faucet_insert` = POST, `faucet_update` = PATCH, `faucet_delete` = DELETE, `faucet_list_tables` = GET on `_table`, `faucet_describe_table` = GET on `_schema/{table}`. `faucet_raw_sql` requires all five verbs on a rule matching component `_sql` (e.g. `*`). `faucet_list_services` only lists services the role can reach. `faucet mcp` in stdio mode runs with local admin privileges; `faucet mcp --transport http` requires the same API key or JWT credentials as the main server.
+
+**Granting rules** from the CLI:
+
+```bash
+faucet role create --name readonly --verbs GET                                        # GET on every service
+faucet role grant --role readonly --service mydb --component "_table/orders" --verbs GET,POST
+```
+
+or through the admin API, which replaces the whole rule list:
+
+```bash
+curl -X PUT -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" \
+  http://localhost:8080/api/v1/system/role/1 -d '{
+    "name": "readonly",
+    "is_active": true,
+    "access": [
+      {"service_name": "*",    "component": "*",              "verb_mask": 1, "requestor_mask": 1, "filters": [], "filter_op": "AND"},
+      {"service_name": "mydb", "component": "_table/orders",  "verb_mask": 3, "requestor_mask": 1, "filters": [], "filter_op": "AND"}
+    ]
+  }'
+```
+
+> Row-level `filters` on a rule are stored and returned by the API but are not yet applied to queries.
+
+**Upgrading.** Before this fix, role rules were stored but never enforced for API-key requests. Roles created with `faucet role create` that were never given rules will now be denied with `403` — grant them rules with `faucet role grant` or the admin UI. Roles created in the admin UI default to GET-only on all services, so API keys that previously wrote data through such roles now need `POST`/`PUT`/`PATCH`/`DELETE` granted explicitly. On startup `faucet serve` logs a warning for every role that has active API keys but would deny all requests (no rules, only `verb_mask: 0` rules, or inactive), together with the `faucet role grant` command that fixes it.
+
+The admin JWT signing secret is no longer a built-in default: when `auth.jwt_secret` / `FAUCET_AUTH_JWT_SECRET` (alias `FAUCET_JWT_SECRET`) is not configured, a random secret is generated on first start and persisted in the data directory. Existing admin sessions are invalidated by the upgrade unless the secret was already configured — log in again.
 
 ## API Routes
 

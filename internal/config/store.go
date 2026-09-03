@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -24,15 +25,25 @@ type Store struct {
 }
 
 // NewStore creates a new config store. Pass empty string for in-memory.
+//
+// The DSN uses modernc.org/sqlite's "_pragma=name(value)" syntax; the
+// go-sqlite3 style "_journal_mode=WAL&_busy_timeout=5000" is silently
+// ignored by the pure-Go driver. File-backed stores run in WAL mode with
+// synchronous=NORMAL (durable across process crashes, far fewer fsyncs)
+// and a 5s busy timeout so RBAC reads are not starved by the occasional
+// write. In-memory stores have no journal to configure.
 func NewStore(dataDir string) (*Store, error) {
 	var dsn string
 	if dataDir == "" {
-		dsn = ":memory:?_journal_mode=WAL"
+		dsn = ":memory:?_pragma=busy_timeout(5000)"
 	} else {
-		if err := os.MkdirAll(dataDir, 0755); err != nil {
+		// The config database holds DSNs, key hashes and the JWT signing
+		// secret, so keep the directory and file private to this user.
+		if err := os.MkdirAll(dataDir, 0700); err != nil {
 			return nil, fmt.Errorf("create data dir: %w", err)
 		}
-		dsn = filepath.Join(dataDir, "faucet.db") + "?_journal_mode=WAL&_busy_timeout=5000"
+		dsn = filepath.Join(dataDir, "faucet.db") +
+			"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 	}
 
 	db, err := sqlx.Connect("sqlite", dsn)
@@ -41,6 +52,10 @@ func NewStore(dataDir string) (*Store, error) {
 	}
 
 	db.SetMaxOpenConns(1) // SQLite doesn't support concurrent writes
+
+	if dataDir != "" {
+		restrictDBFilePerms(filepath.Join(dataDir, "faucet.db"))
+	}
 
 	// Enable foreign keys (off by default in SQLite).
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
@@ -446,6 +461,17 @@ func (s *Store) SetRoleAccess(ctx context.Context, roleID int64, access []model.
 
 	for _, a := range access {
 		a.RoleID = roleID
+		// Empty patterns mean "everything"; store them explicitly as "*"
+		// so the stored rule reads the way it is enforced.
+		if strings.TrimSpace(a.ServiceName) == "" {
+			a.ServiceName = "*"
+		}
+		if strings.TrimSpace(a.Component) == "" {
+			a.Component = "*"
+		}
+		if a.FilterOp == "" {
+			a.FilterOp = "AND"
+		}
 		row, err := roleAccessRowFromModel(a)
 		if err != nil {
 			return err
@@ -726,4 +752,15 @@ func (s *Store) ListSettings(ctx context.Context) (map[string]string, error) {
 func HashAPIKey(key string) string {
 	h := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(h[:])
+}
+
+// restrictDBFilePerms makes the SQLite file and its WAL sidecars readable
+// only by the owner. Errors are ignored: the files may not exist yet and a
+// failed chmod must not stop the server.
+func restrictDBFilePerms(dbPath string) {
+	for _, p := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		if _, err := os.Stat(p); err == nil {
+			_ = os.Chmod(p, 0600)
+		}
+	}
 }

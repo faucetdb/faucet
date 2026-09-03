@@ -518,12 +518,20 @@ func (h *SystemHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If access rules were provided, set them.
+	// If access rules were provided, set them, then reload the stored rules
+	// so the response reflects what was persisted (assigned ids, "" patterns
+	// normalized to "*", default filter_op) rather than the raw request.
 	if len(role.Access) > 0 {
 		if err := h.store.SetRoleAccess(r.Context(), role.ID, role.Access); err != nil {
 			writeError(w, http.StatusInternalServerError, "Failed to set role access: "+err.Error())
 			return
 		}
+		access, err := h.store.GetRoleAccess(r.Context(), role.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to load role access: "+err.Error())
+			return
+		}
+		role.Access = access
 	}
 
 	writeJSON(w, http.StatusCreated, roleToMap(&role))
@@ -572,7 +580,12 @@ func (h *SystemHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var updates model.Role
+	var updates struct {
+		Name        string             `json:"name"`
+		Description string             `json:"description"`
+		IsActive    *bool              `json:"is_active"`
+		Access      []model.RoleAccess `json:"access"`
+	}
 	if err := readJSON(r, &updates); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
@@ -584,20 +597,33 @@ func (h *SystemHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	if updates.Description != "" {
 		existing.Description = updates.Description
 	}
-	existing.IsActive = updates.IsActive
+	// Only touch is_active when the client sent it. Now that access rules
+	// are enforced, an omitted field must not silently deactivate the role
+	// (which would 403 every key bound to it).
+	if updates.IsActive != nil {
+		existing.IsActive = *updates.IsActive
+	}
 
 	if err := h.store.UpdateRole(r.Context(), existing); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update role: "+err.Error())
 		return
 	}
 
-	// If access rules were provided, replace them.
+	// If access rules were provided, replace them, then reload the stored
+	// rules so the response carries the persisted form (assigned ids, ""
+	// patterns normalized to "*", default filter_op) rather than the raw
+	// request slice.
 	if updates.Access != nil {
 		if err := h.store.SetRoleAccess(r.Context(), id, updates.Access); err != nil {
 			writeError(w, http.StatusInternalServerError, "Failed to update role access: "+err.Error())
 			return
 		}
-		existing.Access = updates.Access
+		access, err := h.store.GetRoleAccess(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to load role access: "+err.Error())
+			return
+		}
+		existing.Access = access
 	}
 
 	writeJSON(w, http.StatusOK, roleToMap(existing))
@@ -877,7 +903,7 @@ func (h *SystemHandler) MCPInfo(w http.ResponseWriter, r *http.Request) {
 		{"name": "faucet_insert", "description": "Insert records into a table", "read_only": false},
 		{"name": "faucet_update", "description": "Update records matching a filter", "read_only": false},
 		{"name": "faucet_delete", "description": "Delete records matching a filter", "read_only": false},
-		{"name": "faucet_raw_sql", "description": "Execute raw SQL (if enabled on service)", "read_only": true},
+		{"name": "faucet_raw_sql", "description": "Execute raw SQL (if enabled on service)", "read_only": false},
 	}
 
 	resources := []map[string]interface{}{

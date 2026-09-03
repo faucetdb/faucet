@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"strings"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -63,6 +65,14 @@ func initConfig() {
 	}
 
 	viper.SetEnvPrefix("FAUCET")
+	// Map nested keys to env var names: "auth.jwt_secret" -> FAUCET_AUTH_JWT_SECRET.
+	// Without this replacer AutomaticEnv would look for FAUCET_AUTH.JWT_SECRET,
+	// which no shell can set, and every documented FAUCET_* variable for a
+	// nested key would be silently ignored.
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
+	// Accept both the canonical name and the historical short alias for the
+	// JWT signing secret. The first non-empty variable wins.
+	_ = viper.BindEnv("auth.jwt_secret", "FAUCET_AUTH_JWT_SECRET", "FAUCET_JWT_SECRET")
 	viper.ReadInConfig() // Ignore error - config file is optional
 }

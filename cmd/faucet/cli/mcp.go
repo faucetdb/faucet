@@ -4,14 +4,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
 	fmcp "github.com/faucetdb/faucet/internal/mcp"
+	"github.com/faucetdb/faucet/internal/server/middleware"
+	"github.com/faucetdb/faucet/internal/service"
 )
 
 func newMCPCmd() *cobra.Command {
@@ -28,10 +31,13 @@ as tools for AI agents like Claude. Supports stdio (default) and HTTP transports
 
 In stdio mode, the MCP server communicates over stdin/stdout using JSON-RPC,
 suitable for direct integration with Claude Desktop or other MCP clients.
+The local process is trusted and runs with admin privileges.
 
-In HTTP mode, the server listens on the specified port for SSE connections.`,
+In HTTP mode, the server listens on the specified port for Streamable HTTP
+connections. Clients must authenticate with an X-API-Key header or an admin
+Bearer token; API-key clients are subject to their role's access rules.`,
 		Example: `  faucet mcp                            # stdio mode (for Claude Desktop)
-  faucet mcp --transport http --port 3001  # HTTP SSE mode`,
+  faucet mcp --transport http --port 3001  # authenticated Streamable HTTP mode`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMCP(transport, port)
 		},
@@ -91,12 +97,26 @@ func runMCP(transport string, port int) error {
 		return mcpSrv.ServeStdio()
 	case "http":
 		addr := fmt.Sprintf(":%d", port)
-		jwtSecret := viper.GetString("auth.jwt_secret")
-		if jwtSecret == "" {
-			jwtSecret = "faucet-dev-secret-change-me" //nolint:ineffassign // TODO: wire into MCP HTTP auth
+		// Resolve the same secret the main server uses so that admin
+		// tokens issued by "faucet serve" verify here when both share a
+		// data directory.
+		jwtSecret, err := resolveJWTSecret(context.Background(), store, logger)
+		if err != nil {
+			return fmt.Errorf("resolve jwt secret: %w", err)
 		}
-		logger.Info("starting MCP HTTP server", "addr", addr)
-		return mcpSrv.ServeHTTP(addr)
+		authSvc := service.NewAuthService(store, jwtSecret)
+
+		// The MCP transport itself does not authenticate; wrap it in the
+		// same Authenticate middleware the main server uses so that every
+		// tool call carries a principal for RBAC enforcement.
+		httpServer := &http.Server{
+			Addr:              addr,
+			Handler:           middleware.Authenticate(authSvc)(mcpSrv.HTTPHandler()),
+			ReadHeaderTimeout: 15 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
+		logger.Info("starting authenticated MCP HTTP server", "addr", addr)
+		return httpServer.ListenAndServe()
 	default:
 		return fmt.Errorf("unsupported transport %q; use 'stdio' or 'http'", transport)
 	}
