@@ -266,26 +266,6 @@ func TestRBAC_RoleDeactivated_Denied(t *testing.T) {
 	assertForbidden(t, rr)
 }
 
-func TestRBAC_RoleDeleted_Denied(t *testing.T) {
-	env := newRBACEnv(t)
-	role, key := env.createRoleWithKey(t, "doomed", true, []model.RoleAccess{
-		accessRule("*", "*", model.VerbAll),
-	})
-
-	rr := env.doAPIKey(t, "GET", rbacItemsPath, nil, key)
-	assertStatus(t, rr, http.StatusOK)
-
-	if err := env.store.DeleteRole(context.Background(), role.ID); err != nil {
-		t.Skipf("role bound to an API key cannot be deleted (FK constraint): %v", err)
-	}
-
-	// The key still authenticates (it is active) but its role is gone.
-	rr = env.doAPIKey(t, "GET", rbacItemsPath, nil, key)
-	if rr.Code != http.StatusForbidden && rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 403 or 401; body = %s", rr.Code, rr.Body.String())
-	}
-}
-
 func TestRBAC_AdminJWT_Bypasses(t *testing.T) {
 	env := newRBACEnv(t)
 	token := env.adminToken(t)

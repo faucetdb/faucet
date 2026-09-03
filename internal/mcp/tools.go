@@ -376,6 +376,9 @@ func (s *MCPServer) handleDescribeTable(
 	if err != nil {
 		return toolError("%v", err)
 	}
+	if err := query.ValidateIdentifier(tableName); err != nil {
+		return toolError("Invalid table name %q: %v", tableName, err)
+	}
 
 	if denied := s.authorize(ctx, serviceName, "_schema/"+tableName, model.VerbGet); denied != nil {
 		return denied, nil
@@ -410,6 +413,9 @@ func (s *MCPServer) handleQuery(
 	tableName, err := requireString(request, "table")
 	if err != nil {
 		return toolError("%v", err)
+	}
+	if err := query.ValidateIdentifier(tableName); err != nil {
+		return toolError("Invalid table name %q: %v", tableName, err)
 	}
 
 	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbGet); denied != nil {
@@ -556,6 +562,9 @@ func (s *MCPServer) handleInsert(
 	if err != nil {
 		return toolError("%v", err)
 	}
+	if err := query.ValidateIdentifier(tableName); err != nil {
+		return toolError("Invalid table name %q: %v", tableName, err)
+	}
 
 	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbPost); denied != nil {
 		return denied, nil
@@ -648,6 +657,9 @@ func (s *MCPServer) handleUpdate(
 	tableName, err := requireString(request, "table")
 	if err != nil {
 		return toolError("%v", err)
+	}
+	if err := query.ValidateIdentifier(tableName); err != nil {
+		return toolError("Invalid table name %q: %v", tableName, err)
 	}
 	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbPatch); denied != nil {
 		return denied, nil
@@ -755,6 +767,9 @@ func (s *MCPServer) handleDelete(
 	tableName, err := requireString(request, "table")
 	if err != nil {
 		return toolError("%v", err)
+	}
+	if err := query.ValidateIdentifier(tableName); err != nil {
+		return toolError("Invalid table name %q: %v", tableName, err)
 	}
 	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbDelete); denied != nil {
 		return denied, nil

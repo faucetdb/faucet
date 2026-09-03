@@ -37,7 +37,9 @@ func NewStore(dataDir string) (*Store, error) {
 	if dataDir == "" {
 		dsn = ":memory:?_pragma=busy_timeout(5000)"
 	} else {
-		if err := os.MkdirAll(dataDir, 0755); err != nil {
+		// The config database holds DSNs, key hashes and the JWT signing
+		// secret, so keep the directory and file private to this user.
+		if err := os.MkdirAll(dataDir, 0700); err != nil {
 			return nil, fmt.Errorf("create data dir: %w", err)
 		}
 		dsn = filepath.Join(dataDir, "faucet.db") +
@@ -50,6 +52,10 @@ func NewStore(dataDir string) (*Store, error) {
 	}
 
 	db.SetMaxOpenConns(1) // SQLite doesn't support concurrent writes
+
+	if dataDir != "" {
+		restrictDBFilePerms(filepath.Join(dataDir, "faucet.db"))
+	}
 
 	// Enable foreign keys (off by default in SQLite).
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
@@ -746,4 +752,15 @@ func (s *Store) ListSettings(ctx context.Context) (map[string]string, error) {
 func HashAPIKey(key string) string {
 	h := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(h[:])
+}
+
+// restrictDBFilePerms makes the SQLite file and its WAL sidecars readable
+// only by the owner. Errors are ignored: the files may not exist yet and a
+// failed chmod must not stop the server.
+func restrictDBFilePerms(dbPath string) {
+	for _, p := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		if _, err := os.Stat(p); err == nil {
+			_ = os.Chmod(p, 0600)
+		}
+	}
 }

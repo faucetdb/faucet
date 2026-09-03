@@ -94,7 +94,14 @@ func resolveJWTSecret(ctx context.Context, store *config.Store, logger *slog.Log
 	}
 	secret = hex.EncodeToString(raw)
 	if err := store.SetSetting(ctx, jwtSecretSettingKey, secret); err != nil {
-		return "", fmt.Errorf("persist jwt secret: %w", err)
+		// A read-only data directory must not prevent startup, but the
+		// secret then lives only in memory: sessions will not survive a
+		// restart until the operator pins one.
+		if logger != nil {
+			logger.Warn("could not persist the generated JWT signing secret; admin sessions will not survive a restart — set FAUCET_AUTH_JWT_SECRET to pin one",
+				"error", err)
+		}
+		return secret, nil
 	}
 	if logger != nil {
 		logger.Info("generated a new JWT signing secret and stored it in the data directory; set FAUCET_AUTH_JWT_SECRET to pin it",

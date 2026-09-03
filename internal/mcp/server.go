@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -79,7 +78,9 @@ func (s *MCPServer) Server() *server.MCPServer {
 // an admin principal and RBAC rules are bypassed.
 func (s *MCPServer) ServeStdio() error {
 	s.logger.Info("starting MCP server in stdio mode with local admin privileges (RBAC bypassed)")
-	return s.newStdioServer().Listen(context.Background(), os.Stdin, os.Stdout)
+	// server.ServeStdio installs SIGINT/SIGTERM handling so deferred cleanup
+	// in the caller runs; newStdioServer is kept for tests.
+	return server.ServeStdio(s.server, server.WithStdioContextFunc(stdioAdminContext))
 }
 
 // newStdioServer builds the stdio transport for this server. The returned

@@ -54,9 +54,9 @@ etc.). Use --foreground for Docker, systemd, or other process managers.`,
 				foreground = true
 			}
 			if foreground {
-				return runServe(host, port, noUI, dev)
+				return runServe(viper.GetString("server.host"), viper.GetInt("server.port"), noUI, dev)
 			}
-			return runServeDaemon(host, port, noUI, dev)
+			return runServeDaemon(viper.GetString("server.host"), viper.GetInt("server.port"), noUI, dev)
 		},
 	}
 

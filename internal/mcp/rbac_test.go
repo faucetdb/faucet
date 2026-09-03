@@ -1055,3 +1055,51 @@ func TestMCPServer_StdioInjectsAdminPrincipal(t *testing.T) {
 		}
 	})
 }
+
+// TestMCPRBAC_TableNameMustBeIdentifier guards against a table argument that
+// authorizes as one component but would reach the connector as another
+// (e.g. "users/orders" normalizes to "_table/users" for RBAC).
+func TestMCPRBAC_TableNameMustBeIdentifier(t *testing.T) {
+	env := newRBACTestEnv(t)
+	env.createRole(t, "scoped-users", true, []model.RoleAccess{
+		{ServiceName: rbacTestService, Component: "_table/users", VerbMask: model.VerbGet},
+	})
+	ctx := env.ctxFor(t, "scoped-users")
+
+	for _, table := range []string{"users/orders", "users/../orders", "users orders", "users;drop"} {
+		res, err := env.srv.handleQuery(ctx, callReq(map[string]interface{}{"service": rbacTestService, "table": table}))
+		if err != nil {
+			t.Fatalf("handleQuery(%q): unexpected transport error: %v", table, err)
+		}
+		if res == nil || !res.IsError {
+			t.Fatalf("handleQuery(%q): expected an error result, got %+v", table, res)
+		}
+		text, _ := res.Content[0].(mcp.TextContent)
+		if !strings.Contains(text.Text, "Invalid table name") {
+			t.Errorf("handleQuery(%q): error = %q, want invalid table name", table, text.Text)
+		}
+	}
+}
+
+// TestMCPRBAC_SchemaResourceDoesNotLeakServiceNames checks that a failed
+// schema resource read never names services the role cannot see.
+func TestMCPRBAC_SchemaResourceDoesNotLeakServiceNames(t *testing.T) {
+	env := newRBACTestEnv(t)
+	if err := env.registry.Connect("private_hr", connector.ConnectionConfig{Driver: "sqlite", DSN: ":memory:"}); err != nil {
+		t.Fatalf("registry.Connect(private_hr): %v", err)
+	}
+	t.Cleanup(func() { env.registry.Disconnect("private_hr") })
+	env.createRole(t, "prefix", true, []model.RoleAccess{
+		{ServiceName: "test*", Component: "*", VerbMask: model.VerbGet},
+	})
+
+	req := mcp.ReadResourceRequest{}
+	req.Params.URI = "faucet://schema/testzzz"
+	_, err := env.srv.handleSchemaResource(env.ctxFor(t, "prefix"), req)
+	if err == nil {
+		t.Fatal("expected an error for an unknown service")
+	}
+	if strings.Contains(err.Error(), "private_hr") {
+		t.Errorf("error leaks a service the role cannot see: %v", err)
+	}
+}
