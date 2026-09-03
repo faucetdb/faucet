@@ -903,7 +903,7 @@ func (h *SystemHandler) MCPInfo(w http.ResponseWriter, r *http.Request) {
 		{"name": "faucet_insert", "description": "Insert records into a table", "read_only": false},
 		{"name": "faucet_update", "description": "Update records matching a filter", "read_only": false},
 		{"name": "faucet_delete", "description": "Delete records matching a filter", "read_only": false},
-		{"name": "faucet_raw_sql", "description": "Execute raw SQL (if enabled on service)", "read_only": true},
+		{"name": "faucet_raw_sql", "description": "Execute raw SQL (if enabled on service)", "read_only": false},
 	}
 
 	resources := []map[string]interface{}{

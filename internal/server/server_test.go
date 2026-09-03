@@ -1690,7 +1690,7 @@ func TestMCPEndpoint_E2E_ToolAnnotations(t *testing.T) {
 		"faucet_list_tables":    true,
 		"faucet_describe_table": true,
 		"faucet_query":          true,
-		"faucet_raw_sql":        true,
+		"faucet_raw_sql":        false, // arbitrary SQL may modify data
 	}
 	mutatingTools := map[string]bool{
 		"faucet_insert": true,

@@ -221,7 +221,7 @@ func (s *MCPServer) registerTools(srv *server.MCPServer) {
 					"array and referenced with positional placeholders ($1, $2 for "+
 					"PostgreSQL; ?, ? for MySQL).",
 			),
-			mcp.WithToolAnnotation(readOnlyAnnotation()),
+			mcp.WithToolAnnotation(mutatingAnnotation()),
 			mcp.WithString("service",
 				mcp.Required(),
 				mcp.Description("Name of the database service"),
