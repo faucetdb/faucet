@@ -369,6 +369,9 @@ func TestRequireAccess_ServiceScope(t *testing.T) {
 	prefix := createRole(t, store, "prefix", true, []model.RoleAccess{
 		{ServiceName: "my*", Component: "*", VerbMask: model.VerbAll},
 	})
+	upper := createRole(t, store, "MYDB-only", true, []model.RoleAccess{
+		{ServiceName: "MYDB", Component: "*", VerbMask: model.VerbAll},
+	})
 
 	tests := []struct {
 		name     string
@@ -379,7 +382,9 @@ func TestRequireAccess_ServiceScope(t *testing.T) {
 		{"rule scoped to other service denies mydb", other, "/api/v1/mydb/_table/users", http.StatusForbidden},
 		{"rule scoped to other service allows other", other, "/api/v1/other/_table/users", http.StatusOK},
 		{"rule scoped to mydb allows mydb", mine, "/api/v1/mydb/_table/users", http.StatusOK},
-		{"rule scoped to mydb is case-insensitive", mine, "/api/v1/MyDB/_table/users", http.StatusOK},
+		{"rule scoped to mydb is case-sensitive", mine, "/api/v1/MyDB/_table/users", http.StatusForbidden},
+		{"upper-case rule does not match lower-case service", upper, "/api/v1/mydb/_table/users", http.StatusForbidden},
+		{"upper-case rule matches upper-case service", upper, "/api/v1/MYDB/_table/users", http.StatusOK},
 		{"rule scoped to mydb denies other", mine, "/api/v1/other/_table/users", http.StatusForbidden},
 		{"prefix rule allows mydb", prefix, "/api/v1/mydb/_table/users", http.StatusOK},
 		{"prefix rule denies other", prefix, "/api/v1/other/_table/users", http.StatusForbidden},
@@ -435,7 +440,8 @@ func TestRequireAccess_ComponentScope(t *testing.T) {
 
 		{"URL-encoded segment is unescaped before matching", usersOnly, http.MethodGet, "/api/v1/mydb/_table/us%65rs", http.StatusOK},
 		{"URL-encoded other table still denied", usersOnly, http.MethodGet, "/api/v1/mydb/_table/ord%65rs", http.StatusForbidden},
-		{"case-insensitive component", usersOnly, http.MethodGet, "/api/v1/mydb/_table/USERS", http.StatusOK},
+		{"component is case-sensitive", usersOnly, http.MethodGet, "/api/v1/mydb/_table/USERS", http.StatusForbidden},
+		{"component is case-sensitive (mixed case)", usersOnly, http.MethodGet, "/api/v1/mydb/_table/Users", http.StatusForbidden},
 
 		{"HEAD treated as GET", usersOnly, http.MethodHead, "/api/v1/mydb/_table/users", http.StatusOK},
 		{"HEAD denied where GET is denied", usersOnly, http.MethodHead, "/api/v1/mydb/_table/orders", http.StatusForbidden},
@@ -566,5 +572,92 @@ func TestReadOnlyGuard(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fail-closed on config store failure
+// ---------------------------------------------------------------------------
+
+// assertAuthorizationFailed checks that rr is a 500 in the standard error
+// envelope produced when the config store cannot be consulted.
+func assertAuthorizationFailed(t *testing.T, rr *httptest.ResponseRecorder) {
+	t.Helper()
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	resp := decodeErrorResponse(t, rr)
+	if resp.Error.Code != http.StatusInternalServerError {
+		t.Errorf("error.code = %d, want 500", resp.Error.Code)
+	}
+	if resp.Error.Message != "Authorization check failed" {
+		t.Errorf("error.message = %q, want %q", resp.Error.Message, "Authorization check failed")
+	}
+}
+
+func TestRequireAccess_StoreFailureFailsClosed(t *testing.T) {
+	store := newAccessStore(t)
+	enf := rbac.NewEnforcer(store)
+	roleID := createRole(t, store, "full", true, []model.RoleAccess{
+		{ServiceName: "*", Component: "*", VerbMask: model.VerbAll},
+	})
+	h := newAccessRouter(enf, apiKeyPrincipal(roleID))
+
+	rr := doRequest(h, http.MethodGet, "/api/v1/mydb/_table/users")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 before store failure, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Simulate a config store failure: every role lookup now errors with
+	// something other than ErrNotFound, and the middleware must refuse the
+	// request rather than let it through.
+	if err := store.Close(); err != nil {
+		t.Fatalf("store.Close: %v", err)
+	}
+
+	rr = doRequest(h, http.MethodGet, "/api/v1/mydb/_table/users")
+	assertAuthorizationFailed(t, rr)
+
+	// Admin principals never consult the store, so they are unaffected.
+	admin := newAccessRouter(enf, &Principal{Type: rbac.PrincipalAdmin, IsAdmin: true})
+	rr = doRequest(admin, http.MethodGet, "/api/v1/mydb/_table/users")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("admin: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestReadOnlyGuard_StoreFailureFailsClosed(t *testing.T) {
+	store := newAccessStore(t)
+	ctx := context.Background()
+	svc := &model.ServiceConfig{Name: "rwdb", Driver: "sqlite", DSN: ":memory:", IsActive: true, Pool: model.DefaultPoolConfig()}
+	if err := store.CreateService(ctx, svc); err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+	enf := rbac.NewEnforcer(store)
+
+	// Use an admin principal so RequireAccess is bypassed and the 500 can
+	// only come from ReadOnlyGuard.
+	h := newAccessRouter(enf, &Principal{Type: rbac.PrincipalAdmin, IsAdmin: true}, ReadOnlyGuard(store))
+
+	rr := doRequest(h, http.MethodPost, "/api/v1/rwdb/_table/users")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 before store failure, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("store.Close: %v", err)
+	}
+
+	// Writes can no longer be proven safe: refuse them.
+	rr = doRequest(h, http.MethodPost, "/api/v1/rwdb/_table/users")
+	assertAuthorizationFailed(t, rr)
+
+	// Reads never consult the store and still pass through the guard.
+	rr = doRequest(h, http.MethodGet, "/api/v1/rwdb/_table/users")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET after store failure: expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }

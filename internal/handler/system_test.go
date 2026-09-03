@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
@@ -454,6 +455,153 @@ func TestUpdateRole_WithAccessRules(t *testing.T) {
 	}
 	if len(access) != 2 {
 		t.Errorf("access count = %d, want 2", len(access))
+	}
+}
+
+// accessRules extracts the "access" array from a decoded role response.
+func accessRules(t *testing.T, resp map[string]interface{}) []map[string]interface{} {
+	t.Helper()
+	raw, ok := resp["access"].([]interface{})
+	if !ok {
+		t.Fatalf("expected access to be an array, got %T", resp["access"])
+	}
+	out := make([]map[string]interface{}, 0, len(raw))
+	for _, r := range raw {
+		m, ok := r.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected access rule to be an object, got %T", r)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// assertStoredRuleShape checks that a rule in a role response carries the
+// persisted form: a non-zero id, "" patterns normalized to "*", and the
+// default filter_op.
+func assertStoredRuleShape(t *testing.T, rule map[string]interface{}) {
+	t.Helper()
+	if id, _ := rule["id"].(float64); id == 0 {
+		t.Errorf("rule id = %v, want non-zero (response should carry stored rules)", rule["id"])
+	}
+	if rule["service_name"] != "*" {
+		t.Errorf("service_name = %v, want \"*\"", rule["service_name"])
+	}
+	if rule["component"] != "*" {
+		t.Errorf("component = %v, want \"*\"", rule["component"])
+	}
+	if rule["filter_op"] != "AND" {
+		t.Errorf("filter_op = %v, want AND", rule["filter_op"])
+	}
+}
+
+func TestCreateRole_ResponseReflectsStoredRules(t *testing.T) {
+	env := newTestEnv(t)
+
+	body := toJSON(t, map[string]interface{}{
+		"name": "normalized",
+		"access": []map[string]interface{}{
+			{"service_name": "", "component": "", "verb_mask": model.VerbGet},
+		},
+	})
+	rr := env.do(t, "POST", "/api/v1/system/role", body)
+	assertStatus(t, rr, http.StatusCreated)
+
+	var resp map[string]interface{}
+	decodeJSON(t, rr, &resp)
+	rules := accessRules(t, resp)
+	if len(rules) != 1 {
+		t.Fatalf("access count = %d, want 1", len(rules))
+	}
+	assertStoredRuleShape(t, rules[0])
+}
+
+func TestUpdateRole_ResponseReflectsStoredRules(t *testing.T) {
+	env := newTestEnv(t)
+	role := env.seedRole(t, "normalized")
+
+	body := toJSON(t, map[string]interface{}{
+		"access": []map[string]interface{}{
+			{"service_name": "", "component": "", "verb_mask": model.VerbGet},
+		},
+	})
+	rr := env.do(t, "PUT", fmt.Sprintf("/api/v1/system/role/%d", role.ID), body)
+	assertStatus(t, rr, http.StatusOK)
+
+	var resp map[string]interface{}
+	decodeJSON(t, rr, &resp)
+	rules := accessRules(t, resp)
+	if len(rules) != 1 {
+		t.Fatalf("access count = %d, want 1", len(rules))
+	}
+	assertStoredRuleShape(t, rules[0])
+
+	// The response must agree with what GET returns.
+	rr = env.do(t, "GET", fmt.Sprintf("/api/v1/system/role/%d", role.ID), nil)
+	assertStatus(t, rr, http.StatusOK)
+	var got map[string]interface{}
+	decodeJSON(t, rr, &got)
+	gotRules := accessRules(t, got)
+	if len(gotRules) != 1 || gotRules[0]["id"] != rules[0]["id"] {
+		t.Errorf("GET rules = %v, want %v", gotRules, rules)
+	}
+}
+
+// TestUpdateRole_IsActivePointerSemantics verifies that is_active is only
+// touched when the client sends it: an omitted field must not deactivate
+// the role, "false" must, and "true" must reactivate it.
+func TestUpdateRole_IsActivePointerSemantics(t *testing.T) {
+	env := newTestEnv(t)
+	role := env.seedRole(t, "toggle")
+	path := fmt.Sprintf("/api/v1/system/role/%d", role.ID)
+
+	isActive := func() bool {
+		t.Helper()
+		got, err := env.store.GetRole(context.Background(), role.ID)
+		if err != nil {
+			t.Fatalf("GetRole: %v", err)
+		}
+		return got.IsActive
+	}
+	if !isActive() {
+		t.Fatal("seeded role should start active")
+	}
+
+	// PUT with only access rules and no is_active keeps the role active.
+	rr := env.do(t, "PUT", path, toJSON(t, map[string]interface{}{
+		"access": []map[string]interface{}{
+			{"service_name": "*", "component": "*", "verb_mask": model.VerbGet},
+		},
+	}))
+	assertStatus(t, rr, http.StatusOK)
+	if !isActive() {
+		t.Fatal("PUT without is_active deactivated the role")
+	}
+	var resp map[string]interface{}
+	decodeJSON(t, rr, &resp)
+	if resp["is_active"] != true {
+		t.Errorf("response is_active = %v, want true", resp["is_active"])
+	}
+
+	// PUT with is_active=false deactivates it.
+	rr = env.do(t, "PUT", path, toJSON(t, map[string]interface{}{"is_active": false}))
+	assertStatus(t, rr, http.StatusOK)
+	if isActive() {
+		t.Fatal("PUT with is_active=false did not deactivate the role")
+	}
+
+	// Another PUT without is_active leaves it inactive.
+	rr = env.do(t, "PUT", path, toJSON(t, map[string]interface{}{"description": "still off"}))
+	assertStatus(t, rr, http.StatusOK)
+	if isActive() {
+		t.Fatal("PUT without is_active reactivated the role")
+	}
+
+	// PUT with is_active=true reactivates it.
+	rr = env.do(t, "PUT", path, toJSON(t, map[string]interface{}{"is_active": true}))
+	assertStatus(t, rr, http.StatusOK)
+	if !isActive() {
+		t.Fatal("PUT with is_active=true did not reactivate the role")
 	}
 }
 

@@ -25,15 +25,23 @@ type Store struct {
 }
 
 // NewStore creates a new config store. Pass empty string for in-memory.
+//
+// The DSN uses modernc.org/sqlite's "_pragma=name(value)" syntax; the
+// go-sqlite3 style "_journal_mode=WAL&_busy_timeout=5000" is silently
+// ignored by the pure-Go driver. File-backed stores run in WAL mode with
+// synchronous=NORMAL (durable across process crashes, far fewer fsyncs)
+// and a 5s busy timeout so RBAC reads are not starved by the occasional
+// write. In-memory stores have no journal to configure.
 func NewStore(dataDir string) (*Store, error) {
 	var dsn string
 	if dataDir == "" {
-		dsn = ":memory:?_journal_mode=WAL"
+		dsn = ":memory:?_pragma=busy_timeout(5000)"
 	} else {
 		if err := os.MkdirAll(dataDir, 0755); err != nil {
 			return nil, fmt.Errorf("create data dir: %w", err)
 		}
-		dsn = filepath.Join(dataDir, "faucet.db") + "?_journal_mode=WAL&_busy_timeout=5000"
+		dsn = filepath.Join(dataDir, "faucet.db") +
+			"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 	}
 
 	db, err := sqlx.Connect("sqlite", dsn)

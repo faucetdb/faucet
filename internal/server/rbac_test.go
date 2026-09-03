@@ -333,6 +333,47 @@ func TestRBAC_ServiceScoped(t *testing.T) {
 	assertForbidden(t, rr)
 }
 
+// TestRBAC_CaseSensitive verifies that service and component patterns must
+// match the URL exactly: a rule for "MYDB" grants nothing on "mydb", and a
+// rule for "_table/Items" grants nothing on "_table/items".
+func TestRBAC_CaseSensitive(t *testing.T) {
+	env := newRBACEnv(t)
+	_, upperSvcKey := env.createRoleWithKey(t, "upper-service", true, []model.RoleAccess{
+		accessRule("MYDB", "*", model.VerbAll),
+	})
+	_, upperTableKey := env.createRoleWithKey(t, "upper-table", true, []model.RoleAccess{
+		accessRule("mydb", "_table/Items", model.VerbAll),
+	})
+	_, prefixKey := env.createRoleWithKey(t, "upper-prefix", true, []model.RoleAccess{
+		accessRule("MY*", "_TABLE/*", model.VerbAll),
+	})
+
+	rr := env.doAPIKey(t, "GET", rbacItemsPath, nil, upperSvcKey)
+	ctx := assertForbidden(t, rr)
+	if ctx["service"] != "mydb" {
+		t.Errorf("context.service = %v, want mydb", ctx["service"])
+	}
+
+	rr = env.doAPIKey(t, "GET", rbacItemsPath, nil, upperTableKey)
+	ctx = assertForbidden(t, rr)
+	if ctx["component"] != "_table/items" {
+		t.Errorf("context.component = %v, want _table/items", ctx["component"])
+	}
+
+	rr = env.doAPIKey(t, "GET", rbacItemsPath, nil, prefixKey)
+	assertForbidden(t, rr)
+
+	// The exact spelling is still granted.
+	_, exactKey := env.createRoleWithKey(t, "exact", true, []model.RoleAccess{
+		accessRule("mydb", "_table/items", model.VerbGet),
+	})
+	rr = env.doAPIKey(t, "GET", rbacItemsPath, nil, exactKey)
+	assertStatus(t, rr, http.StatusOK)
+	// ... but not a differently-cased URL for the same rule.
+	rr = env.doAPIKey(t, "GET", "/api/v1/mydb/_table/Items", nil, exactKey)
+	assertForbidden(t, rr)
+}
+
 func TestRBAC_TableScoped(t *testing.T) {
 	env := newRBACEnv(t)
 	_, itemsKey := env.createRoleWithKey(t, "items-only", true, []model.RoleAccess{
