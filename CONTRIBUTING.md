@@ -69,6 +69,17 @@ Open an [issue](https://github.com/faucetdb/faucet/issues) with:
 - Steps to reproduce
 - Expected vs. actual behavior
 
+## Releasing
+
+Maintainers cut a release by pushing a tag: `git tag v0.1.14 && git push origin v0.1.14`.
+
+1. `.github/workflows/release.yml` (GoReleaser) builds the archives and publishes the GitHub release, Docker images and the Homebrew formula.
+2. `.github/workflows/npm-publish.yml` runs automatically once "Release" succeeds (`workflow_run`) and publishes `@faucetdb/faucet` plus the six platform packages from the release archives via `scripts/npm-publish.sh`. It can also be started by hand from the Actions tab ("Publish npm" -> Run workflow -> tag) to retry a partial publish; versions already on npm are skipped.
+
+npm authentication: the workflow uses [trusted publishing (OIDC)](https://docs.npmjs.com/trusted-publishers) when the `NPM_TOKEN` secret is absent. Each of the 7 packages on npmjs.com must list the trusted publisher `faucetdb/faucet`, workflow file `npm-publish.yml`. If `NPM_TOKEN` is set it is used instead; note that npm granular tokens expire after at most 90 days, and an expired token shows up as `404 Not Found - PUT https://registry.npmjs.org/@faucetdb%2f...`.
+
+To exercise the pipeline locally without publishing: `DRY_RUN=1 ./scripts/npm-publish.sh v0.1.13` (needs `gh` and `npm`).
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).
