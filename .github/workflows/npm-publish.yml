@@ -20,6 +20,11 @@ on:
         description: "Release tag, e.g. v0.1.13"
         required: true
         type: string
+      use_oidc:
+        description: "Ignore the NPM_TOKEN secret for this run and use trusted publishing (OIDC)"
+        required: false
+        type: boolean
+        default: false
   workflow_run:
     workflows: ["Release"]
     types: [completed]
@@ -46,8 +51,9 @@ jobs:
           WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           VERSION="${INPUT_VERSION:-$WORKFLOW_RUN_HEAD_BRANCH}"
-          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            echo "::error::Resolved version '${VERSION}' is not a release tag (expected vX.Y.Z)"
+          # Anchored: the value reaches a shell below, and only final releases go to npm.
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Resolved version '${VERSION}' is not a final release tag (expected vX.Y.Z)"
             exit 1
           fi
           echo "Publishing npm packages for ${VERSION}"
@@ -64,12 +70,21 @@ jobs:
           node-version: "22"
 
       - name: Update npm (trusted publishing needs >= 11.5.1)
+        # Pinned to the npm 11 line: npm@latest (12+) drops older Node 22 releases.
         run: |
-          npm install -g npm@latest
+          npm install -g npm@11
           npm --version
 
       - name: Publish npm packages
-        run: ./scripts/npm-publish.sh "${{ steps.version.outputs.version }}"
         env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          USE_OIDC: ${{ inputs.use_oidc }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Values are passed through the environment, never interpolated into the shell.
+        run: |
+          if [[ "$USE_OIDC" == "true" ]]; then
+            echo "use_oidc=true: ignoring the NPM_TOKEN secret for this run"
+            export NPM_TOKEN=""
+          fi
+          ./scripts/npm-publish.sh "$RELEASE_VERSION"

@@ -21,12 +21,16 @@ set -euo pipefail
 # registry are skipped, so a partially failed run can simply be started again.
 
 VERSION="${1:?Usage: npm-publish.sh <version> (e.g. v0.1.13)}"
-if [[ ! "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-  echo "ERROR: '$VERSION' is not a release version (expected vX.Y.Z)" >&2
+# Anchored on purpose: the value is used in shell commands and as the release
+# tag. Prereleases are rejected so nothing but final releases reach the
+# npm "latest" dist-tag.
+if [[ ! "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "ERROR: '$VERSION' is not a final release version (expected vX.Y.Z)" >&2
   exit 1
 fi
-# Strip leading 'v' for npm (v0.1.13 -> 0.1.13)
+# npm wants 0.1.13, the GitHub release tag is v0.1.13; accept either form.
 NPM_VERSION="${VERSION#v}"
+VERSION="v${NPM_VERSION}"
 DRY_RUN="${DRY_RUN:-0}"
 NPM_TOKEN="${NPM_TOKEN:-}"
 REGISTRY_HOST="registry.npmjs.org"
@@ -73,34 +77,37 @@ version_ge() {
 # ---------------------------------------------------------------------------
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/faucet-npm-publish.XXXXXX")"
 NPMRC="$WORK_DIR/npmrc"
-export NPM_CONFIG_USERCONFIG="$NPMRC"
-
-# In DRY_RUN mode the version rewrites are undone from pristine copies taken
-# before the first edit (so uncommitted local changes survive, unlike a
-# `git checkout`), leaving the tree exactly as it was.
 BACKUP_DIR="$WORK_DIR/package-json"
-mkdir -p "$BACKUP_DIR"
-for p in $PLATFORM_PKGS faucet; do
-  cp "$NPM_DIR/$p/package.json" "$BACKUP_DIR/$p.json"
-done
+export NPM_CONFIG_USERCONFIG="$NPMRC"
 
 cleanup() {
   local p
   for p in $PLATFORM_PKGS; do
     rm -rf "${NPM_DIR:?}/${p:?}/bin"
   done
-  if [[ "$DRY_RUN" == "1" ]]; then
+  if [[ "$DRY_RUN" == "1" && -d "$BACKUP_DIR" ]]; then
     for p in $PLATFORM_PKGS faucet; do
-      [[ -f "$BACKUP_DIR/$p.json" ]] && cp "$BACKUP_DIR/$p.json" "$NPM_DIR/$p/package.json"
+      cp "$BACKUP_DIR/$p.json" "$NPM_DIR/$p/package.json"
     done
   fi
   rm -rf "$WORK_DIR"
 }
+# Installed before anything else is created so no failure path leaks files.
 trap cleanup EXIT
 
-# Only ever write literal values here: an .npmrc line such as ${NPM_TOKEN}
-# referencing an unset variable makes npm abort ("Failed to replace env in config").
-echo "registry=${REGISTRY_URL}" > "$NPMRC"
+# In DRY_RUN mode the version rewrites are undone from pristine copies taken
+# before the first edit (so uncommitted local changes survive, unlike a
+# `git checkout`), leaving the tree exactly as it was.
+mkdir -p "$BACKUP_DIR"
+for p in $PLATFORM_PKGS faucet; do
+  cp "$NPM_DIR/$p/package.json" "$BACKUP_DIR/$p.json"
+done
+
+# The userconfig may hold the token: owner-only permissions, and only ever
+# literal values. An .npmrc line such as ${NPM_TOKEN} referencing an unset
+# variable makes npm abort ("Failed to replace env in config").
+(umask 077 && : > "$NPMRC")
+echo "registry=${REGISTRY_URL}" >> "$NPMRC"
 
 PUBLISH_FLAGS="--access public"
 
@@ -142,8 +149,10 @@ Fix one of:
      linux-arm64, darwin-x64, darwin-arm64, win32-x64, win32-arm64) ->
      Settings -> Trusted Publisher -> GitHub Actions with
        owner: faucetdb   repository: faucet   workflow file: npm-publish.yml
-     then delete the NPM_TOKEN secret (or leave it empty) so this script
-     uses OIDC mode.
+       environment: leave blank
+     then delete the NPM_TOKEN repository secret: while it exists this script
+     uses it and never tries OIDC. (Test first with the "use_oidc" input of the
+     Publish npm workflow, which ignores the secret for one run.)
 
 EOF
     exit 1
@@ -177,7 +186,7 @@ EOF
     cat >&2 <<EOF
 
 ERROR: npm ${NPM_CLI_VERSION} is too old for trusted publishing (need >= ${MIN_OIDC_NPM}).
-Run "npm install -g npm@latest" before this script (the workflow does this).
+Run "npm install -g npm@11" before this script (the workflow does this).
 
 EOF
     exit 1
@@ -210,10 +219,10 @@ for goreleaser_key in $GORELEASER_KEYS; do
     binary="faucet"
   fi
 
-  if [[ ! -f "$archive" ]]; then
-    log "WARNING: archive not found: $archive (skipping @faucetdb/$npm_pkg)"
-    continue
-  fi
+  # Every release ships all six archives; a missing one means a broken
+  # release, and publishing @faucetdb/faucet with a dangling
+  # optionalDependency would break installs on that platform.
+  [[ -f "$archive" ]] || die "archive not found: $archive (release ${VERSION} is incomplete)"
 
   rm -rf "${pkg_dir:?}/bin"
   mkdir -p "$pkg_dir/bin"
@@ -270,7 +279,21 @@ publish_pkg() {
     log "Publishing ${name}@${NPM_VERSION}"
   fi
   # shellcheck disable=SC2086  # PUBLISH_FLAGS is intentionally word-split
-  (cd "$dir" && npm publish $PUBLISH_FLAGS)
+  if ! (cd "$dir" && npm publish $PUBLISH_FLAGS); then
+    if [[ -z "$NPM_TOKEN" && "$DRY_RUN" != "1" ]]; then
+      cat >&2 <<EOF
+
+ERROR: npm publish failed for ${name}@${NPM_VERSION} in trusted publishing (OIDC) mode.
+npm reports OIDC problems only as a generic ENEEDAUTH. Check on npmjs.com that
+${name} -> Settings -> Trusted Publisher lists
+  owner: faucetdb   repository: faucet   workflow file: npm-publish.yml   environment: (blank)
+and that the job has "permissions: id-token: write". Packages already published
+in this run are skipped when you re-run the workflow.
+
+EOF
+    fi
+    exit 1
+  fi
 }
 
 # Platform packages first: the main package depends on them
@@ -285,8 +308,12 @@ for npm_pkg in $PLATFORM_PKGS; do
   DONE_COUNT=$((DONE_COUNT + 1))
 done
 
-if [[ "$DONE_COUNT" -eq 0 ]]; then
-  die "no platform packages were published or found on the registry. Aborting before the main package."
+# The main package pins every platform package at this version, so all six
+# must be on the registry (published now or earlier) before it goes out.
+EXPECTED_COUNT=0
+for _ in $PLATFORM_PKGS; do EXPECTED_COUNT=$((EXPECTED_COUNT + 1)); done
+if [[ "$DONE_COUNT" -ne "$EXPECTED_COUNT" ]]; then
+  die "only ${DONE_COUNT}/${EXPECTED_COUNT} platform packages are on the registry. Aborting before the main package."
 fi
 
 # Main package last
