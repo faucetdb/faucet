@@ -1,6 +1,9 @@
 package mcp
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -10,16 +13,26 @@ import (
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
+	"github.com/faucetdb/faucet/internal/model"
+	"github.com/faucetdb/faucet/internal/rbac"
 )
 
 // MCPServer wraps the mcp-go server with Faucet-specific tool and resource
 // registrations. It exposes database services as MCP tools so AI agents can
 // discover schemas, query data, and perform CRUD operations.
+//
+// Every tool call and resource read is authorized against the same
+// role-based access rules that govern the REST API: the principal attached
+// to the request context (see rbac.PrincipalFromContext) must hold a role
+// whose access rules grant the HTTP verb equivalent of the operation on the
+// service/component being touched. Admin principals bypass the check; a
+// missing principal is refused.
 type MCPServer struct {
 	registry *connector.Registry
 	store    *config.Store
 	logger   *slog.Logger
 	server   *server.MCPServer
+	enforcer *rbac.Enforcer
 }
 
 // NewMCPServer creates an MCPServer pre-loaded with all Faucet tools and
@@ -29,6 +42,7 @@ func NewMCPServer(registry *connector.Registry, store *config.Store, logger *slo
 		registry: registry,
 		store:    store,
 		logger:   logger,
+		enforcer: rbac.NewEnforcer(store),
 	}
 
 	mcpServer := server.NewMCPServer(
@@ -57,28 +71,97 @@ func (s *MCPServer) Server() *server.MCPServer {
 // ServeStdio starts the MCP server in stdio mode. This is the primary
 // integration path for Claude Code, Claude Desktop, and other MCP clients
 // that launch the server as a subprocess.
+//
+// The local process is trusted: whoever can launch it already has direct
+// access to the Faucet config database, so every request is executed with
+// an admin principal and RBAC rules are bypassed.
 func (s *MCPServer) ServeStdio() error {
-	s.logger.Info("starting MCP server in stdio mode")
-	return server.ServeStdio(s.server)
-}
-
-// ServeHTTP starts the MCP server in Streamable HTTP mode, listening on
-// the given address (e.g. ":3001"). This is suitable for remote MCP clients.
-func (s *MCPServer) ServeHTTP(addr string) error {
-	httpServer := server.NewStreamableHTTPServer(s.server,
-		server.WithHeartbeatInterval(30*time.Second),
-	)
-	s.logger.Info("MCP HTTP server starting", "addr", addr)
-	return httpServer.Start(addr)
+	s.logger.Info("starting MCP server in stdio mode with local admin privileges (RBAC bypassed)")
+	return server.ServeStdio(s.server, server.WithStdioContextFunc(func(ctx context.Context) context.Context {
+		return rbac.WithPrincipal(ctx, &rbac.Principal{Type: rbac.PrincipalAdmin, IsAdmin: true})
+	}))
 }
 
 // HTTPHandler returns an http.Handler implementing the Streamable HTTP MCP
 // transport. This is suitable for mounting on an existing HTTP server/router
 // so the MCP endpoint runs alongside the REST API on the same port.
+//
+// The handler performs no authentication itself: it must be mounted behind
+// middleware.Authenticate so that a principal is present on the request
+// context. Requests without a principal are refused by every tool.
 func (s *MCPServer) HTTPHandler() http.Handler {
 	return server.NewStreamableHTTPServer(s.server,
 		server.WithHeartbeatInterval(30*time.Second),
 	)
+}
+
+// ---------------------------------------------------------------------------
+// Authorization
+// ---------------------------------------------------------------------------
+
+// authorize checks that the principal carried by ctx may perform verb on
+// service/component. It returns nil when the call is allowed; otherwise it
+// returns a tool error result whose text starts with "Forbidden: " (for an
+// RBAC denial) or "Authorization check failed: " (for a loader failure).
+// A missing principal is refused (fail closed). Handlers must call it after
+// parsing their required arguments and before touching the registry or any
+// database.
+func (s *MCPServer) authorize(ctx context.Context, service, component string, verb int) *mcp.CallToolResult {
+	principal := rbac.PrincipalFromContext(ctx)
+	err := s.enforcer.Authorize(ctx, principal, service, component, verb)
+	if err == nil {
+		return nil
+	}
+	return authorizationError(err)
+}
+
+// authorizationError converts an error returned by the rbac package into a
+// tool error result.
+func authorizationError(err error) *mcp.CallToolResult {
+	var denial *rbac.Denial
+	if errors.As(err, &denial) {
+		return mcp.NewToolResultError("Forbidden: " + denial.Reason)
+	}
+	return mcp.NewToolResultError(fmt.Sprintf("Authorization check failed: %v", err))
+}
+
+// visibleServices returns the configured services the principal carried by
+// ctx may see. Admin principals see every service; API-key principals see
+// only the services their role grants at least one verb on. It returns a
+// *rbac.Denial when there is no principal or the role cannot be used, and
+// a plain error when the role or service list cannot be loaded.
+func (s *MCPServer) visibleServices(ctx context.Context) ([]model.ServiceConfig, error) {
+	principal := rbac.PrincipalFromContext(ctx)
+	if principal == nil {
+		return nil, &rbac.Denial{Reason: "Authentication required"}
+	}
+
+	var role *model.Role
+	if !principal.IsAdmin {
+		// Resolve the role before touching the service list so that a bad
+		// principal never reaches the config store.
+		var err error
+		role, err = s.enforcer.Role(ctx, principal)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	services, err := s.store.ListServices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if role == nil {
+		return services, nil
+	}
+
+	visible := make([]model.ServiceConfig, 0, len(services))
+	for _, svc := range services {
+		if rbac.CanAccessService(role.Access, svc.Name) {
+			visible = append(visible, svc)
+		}
+	}
+	return visible, nil
 }
 
 // toolAnnotation returns a standard ToolAnnotation for read-only vs

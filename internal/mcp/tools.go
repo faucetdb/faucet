@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,7 +11,9 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/faucetdb/faucet/internal/connector"
+	"github.com/faucetdb/faucet/internal/model"
 	"github.com/faucetdb/faucet/internal/query"
+	"github.com/faucetdb/faucet/internal/rbac"
 )
 
 // registerTools registers all Faucet MCP tools on the given server.
@@ -23,7 +26,8 @@ func (s *MCPServer) registerTools(srv *server.MCPServer) {
 			mcp.WithDescription(
 				"List all database services configured in Faucet. Returns each service's "+
 					"name, driver type, active status, and access mode. Use this first to "+
-					"discover available databases before querying.",
+					"discover available databases before querying. Only services your "+
+					"role has access to are listed.",
 			),
 			mcp.WithToolAnnotation(readOnlyAnnotation()),
 		),
@@ -35,7 +39,7 @@ func (s *MCPServer) registerTools(srv *server.MCPServer) {
 			mcp.WithDescription(
 				"List all tables in a database service, including approximate row counts "+
 					"and column summaries. Use this to explore what data is available before "+
-					"querying specific tables.",
+					"querying specific tables. Requires GET permission on _table.",
 			),
 			mcp.WithToolAnnotation(readOnlyAnnotation()),
 			mcp.WithString("service",
@@ -51,7 +55,8 @@ func (s *MCPServer) registerTools(srv *server.MCPServer) {
 			mcp.WithDescription(
 				"Get the detailed schema for a specific table, including all columns "+
 					"with their types, nullability, defaults, primary keys, foreign keys, "+
-					"and indexes. Use this to understand table structure before writing queries.",
+					"and indexes. Use this to understand table structure before writing queries. "+
+					"Requires GET permission on the table's schema (_schema/{table}).",
 			),
 			mcp.WithToolAnnotation(readOnlyAnnotation()),
 			mcp.WithString("service",
@@ -72,7 +77,8 @@ func (s *MCPServer) registerTools(srv *server.MCPServer) {
 		mcp.NewTool("faucet_query",
 			mcp.WithDescription(
 				"Query records from a database table with optional filtering, field "+
-					"selection, ordering, and pagination. Returns results as JSON.\n\n"+
+					"selection, ordering, and pagination. Returns results as JSON. "+
+					"Requires GET permission on the table.\n\n"+
 					"Filter syntax (DreamFactory-compatible):\n"+
 					"  - Simple: name = 'John'\n"+
 					"  - Comparison: age > 21, price <= 100\n"+
@@ -126,7 +132,8 @@ func (s *MCPServer) registerTools(srv *server.MCPServer) {
 			mcp.WithDescription(
 				"Insert one or more records into a database table. Each record is a "+
 					"JSON object mapping column names to values. Returns the inserted "+
-					"records (with auto-generated fields like IDs) if the database supports RETURNING.",
+					"records (with auto-generated fields like IDs) if the database supports RETURNING. "+
+					"Requires POST permission on the table.",
 			),
 			mcp.WithToolAnnotation(mutatingAnnotation()),
 			mcp.WithString("service",
@@ -150,7 +157,8 @@ func (s *MCPServer) registerTools(srv *server.MCPServer) {
 			mcp.WithDescription(
 				"Update records in a database table that match a filter expression. "+
 					"The record object contains the column values to set. A filter is "+
-					"required to prevent accidental full-table updates.",
+					"required to prevent accidental full-table updates. "+
+					"Requires PATCH permission on the table.",
 			),
 			mcp.WithToolAnnotation(mutatingAnnotation()),
 			mcp.WithString("service",
@@ -178,7 +186,8 @@ func (s *MCPServer) registerTools(srv *server.MCPServer) {
 			mcp.WithDescription(
 				"Delete records from a database table that match a filter expression. "+
 					"A filter is required to prevent accidental full-table deletes. "+
-					"Returns the number of deleted records.",
+					"Returns the number of deleted records. "+
+					"Requires DELETE permission on the table.",
 			),
 			mcp.WithToolAnnotation(mutatingAnnotation()),
 			mcp.WithString("service",
@@ -204,7 +213,9 @@ func (s *MCPServer) registerTools(srv *server.MCPServer) {
 			mcp.WithDescription(
 				"Execute a raw SQL query against a database service. Only available "+
 					"for services with raw_sql_allowed enabled. Use faucet_list_services "+
-					"to check which services allow raw SQL.\n\n"+
+					"to check which services allow raw SQL. Because arbitrary SQL can touch "+
+					"any object, it requires a role rule granting all verbs (GET, POST, PUT, "+
+					"PATCH, DELETE) on the _sql component of the service.\n\n"+
 					"The query is executed read-only by default. Parameters should be "+
 					"passed as an array and referenced with positional placeholders "+
 					"($1, $2 for PostgreSQL; ?, ? for MySQL).",
@@ -236,14 +247,19 @@ func (s *MCPServer) registerTools(srv *server.MCPServer) {
 // Tool handlers
 // =========================================================================
 
-// handleListServices returns all configured database services.
+// handleListServices returns the configured database services visible to
+// the calling principal (admins see all; API keys see only the services
+// their role grants access to).
 func (s *MCPServer) handleListServices(
 	ctx context.Context,
 	request mcp.CallToolRequest,
 ) (*mcp.CallToolResult, error) {
 
-	services, err := s.store.ListServices(ctx)
+	services, err := s.visibleServices(ctx)
 	if err != nil {
+		if errors.Is(err, rbac.ErrForbidden) {
+			return authorizationError(err), nil
+		}
 		return toolError("Failed to list services: %v", err)
 	}
 
@@ -280,6 +296,10 @@ func (s *MCPServer) handleListTables(
 	serviceName, err := requireString(request, "service")
 	if err != nil {
 		return toolError("%v. Available services: %v", err, s.registry.ListServices())
+	}
+
+	if denied := s.authorize(ctx, serviceName, "_table", model.VerbGet); denied != nil {
+		return denied, nil
 	}
 
 	conn, err := s.registry.Get(serviceName)
@@ -357,6 +377,10 @@ func (s *MCPServer) handleDescribeTable(
 		return toolError("%v", err)
 	}
 
+	if denied := s.authorize(ctx, serviceName, "_schema/"+tableName, model.VerbGet); denied != nil {
+		return denied, nil
+	}
+
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
 		return toolError("Service %q not found. Available services: %v",
@@ -397,6 +421,10 @@ func (s *MCPServer) handleQuery(
 	offset := optionalInt(request, "offset", 0)
 	if offset < 0 {
 		offset = 0
+	}
+
+	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbGet); denied != nil {
+		return denied, nil
 	}
 
 	conn, err := s.registry.Get(serviceName)
@@ -531,6 +559,10 @@ func (s *MCPServer) handleInsert(
 		return toolError("%v", err)
 	}
 
+	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbPost); denied != nil {
+		return denied, nil
+	}
+
 	// Check read-only status.
 	svc, err := s.store.GetServiceByName(ctx, serviceName)
 	if err == nil && svc.ReadOnly {
@@ -626,6 +658,10 @@ func (s *MCPServer) handleUpdate(
 	if err != nil {
 		return toolError("A filter is required for update operations to prevent " +
 			"accidental full-table updates. Example: id = 42")
+	}
+
+	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbPatch); denied != nil {
+		return denied, nil
 	}
 
 	// Check read-only status.
@@ -735,6 +771,10 @@ func (s *MCPServer) handleDelete(
 			"accidental full-table deletes. Example: id = 42")
 	}
 
+	if denied := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbDelete); denied != nil {
+		return denied, nil
+	}
+
 	// Check read-only status.
 	svc, err := s.store.GetServiceByName(ctx, serviceName)
 	if err == nil && svc.ReadOnly {
@@ -805,6 +845,12 @@ func (s *MCPServer) handleRawSQL(
 	params := getAnySliceArg(request, "params")
 	timeoutSec := optionalInt(request, "timeout", 30)
 	limit := clamp(optionalInt(request, "limit", 100), 1, 10000)
+
+	// Arbitrary SQL can read or modify anything in the service, so it needs
+	// a rule granting every verb on the "_sql" component.
+	if denied := s.authorize(ctx, serviceName, "_sql", model.VerbAll); denied != nil {
+		return denied, nil
+	}
 
 	// Check that the service allows raw SQL.
 	svc, err := s.store.GetServiceByName(ctx, serviceName)
