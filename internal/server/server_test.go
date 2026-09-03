@@ -885,6 +885,13 @@ func TestServiceEndpoint_APIKeyAuth(t *testing.T) {
 	if err := env.store.CreateRole(ctx, role); err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
+	// RBAC is fail-closed: a role with no access rules grants nothing, so
+	// grant GET on every service/component to let the key reach the handler.
+	if err := env.store.SetRoleAccess(ctx, role.ID, []model.RoleAccess{
+		{ServiceName: "*", Component: "*", VerbMask: model.VerbGet},
+	}); err != nil {
+		t.Fatalf("SetRoleAccess: %v", err)
+	}
 
 	rawKey := "faucet_integrationtestapikey12345"
 	keyHash := config.HashAPIKey(rawKey)
@@ -1064,10 +1071,14 @@ func TestFullWorkflow(t *testing.T) {
 	rr = env.doAuth(t, "POST", "/api/v1/system/service", svcBody, token)
 	assertStatus(t, rr, http.StatusCreated)
 
-	// Step 3: Create a role
+	// Step 3: Create a role. RBAC is fail-closed: a role with no access
+	// rules grants nothing, so grant GET on every service/component.
 	roleBody := jsonBody(t, map[string]interface{}{
 		"name":        "demo-reader",
 		"description": "Read access to demo",
+		"access": []map[string]interface{}{
+			{"service_name": "*", "component": "*", "verb_mask": model.VerbGet},
+		},
 	})
 	rr = env.doAuth(t, "POST", "/api/v1/system/role", roleBody, token)
 	assertStatus(t, rr, http.StatusCreated)
@@ -1810,6 +1821,13 @@ func newTestEnvWithSQLite(t *testing.T) (*testEnv, string) {
 	role := &model.Role{Name: "tester", IsActive: true}
 	if err := env.store.CreateRole(ctx, role); err != nil {
 		t.Fatalf("CreateRole: %v", err)
+	}
+	// RBAC is fail-closed: grant every verb on every service/component so
+	// the data API tests can read and write.
+	if err := env.store.SetRoleAccess(ctx, role.ID, []model.RoleAccess{
+		{ServiceName: "*", Component: "*", VerbMask: model.VerbAll},
+	}); err != nil {
+		t.Fatalf("SetRoleAccess: %v", err)
 	}
 
 	rawKey := "faucet_sqltestkey1234567890abcdef"
