@@ -1,6 +1,9 @@
 package mcp
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -10,6 +13,9 @@ import (
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
+	"github.com/faucetdb/faucet/internal/model"
+	"github.com/faucetdb/faucet/internal/server/middleware"
+	"github.com/faucetdb/faucet/internal/service"
 )
 
 // MCPServer wraps the mcp-go server with Faucet-specific tool and resource
@@ -18,16 +24,21 @@ import (
 type MCPServer struct {
 	registry *connector.Registry
 	store    *config.Store
+	authSvc  *service.AuthService
 	logger   *slog.Logger
 	server   *server.MCPServer
 }
 
 // NewMCPServer creates an MCPServer pre-loaded with all Faucet tools and
 // resources. The returned server is ready to serve over stdio or HTTP.
-func NewMCPServer(registry *connector.Registry, store *config.Store, logger *slog.Logger) *MCPServer {
+// authSvc enforces role access rules for requests that carry an authenticated
+// principal (the /mcp endpoint on the REST server); it may be nil when no
+// authentication layer sits in front of the server, such as stdio mode.
+func NewMCPServer(registry *connector.Registry, store *config.Store, authSvc *service.AuthService, logger *slog.Logger) *MCPServer {
 	s := &MCPServer{
 		registry: registry,
 		store:    store,
+		authSvc:  authSvc,
 		logger:   logger,
 	}
 
@@ -79,6 +90,29 @@ func (s *MCPServer) HTTPHandler() http.Handler {
 	return server.NewStreamableHTTPServer(s.server,
 		server.WithHeartbeatInterval(30*time.Second),
 	)
+}
+
+// authorize enforces the caller's role access rules the same way the REST
+// middleware does. The context carries a principal only when the request came
+// through the authenticated /mcp HTTP endpoint. Stdio sessions have no
+// principal: there is no authentication layer at all, the process boundary is
+// the gate, so they are allowed through unchanged.
+func (s *MCPServer) authorize(ctx context.Context, serviceName, component string, verb int) error {
+	principal := middleware.GetPrincipal(ctx)
+	if principal == nil || principal.IsAdmin {
+		return nil
+	}
+	// An authenticated key with nowhere to check its role must fail closed,
+	// otherwise a server wired without authSvc would silently grant everything.
+	if s.authSvc == nil {
+		return fmt.Errorf("access denied: authorization is not configured for this server")
+	}
+	err := s.authSvc.Authorize(ctx, principal.RoleID, serviceName, component, verb)
+	if errors.Is(err, service.ErrForbidden) {
+		return fmt.Errorf("access denied: your role does not permit %s on %s/%s",
+			model.VerbName(verb), serviceName, component)
+	}
+	return err
 }
 
 // toolAnnotation returns a standard ToolAnnotation for read-only vs

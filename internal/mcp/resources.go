@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/faucetdb/faucet/internal/model"
 	"github.com/mark3labs/mcp-go/server"
 )
 
@@ -104,6 +106,10 @@ func (s *MCPServer) handleSchemaResource(
 	serviceName := strings.TrimPrefix(uri, "faucet://schema/")
 	if serviceName == "" || serviceName == uri {
 		return nil, fmt.Errorf("invalid schema URI %q: expected faucet://schema/{service}", uri)
+	}
+
+	if err := s.authorize(ctx, serviceName, "_schema", model.VerbGet); err != nil {
+		return nil, err
 	}
 
 	conn, err := s.registry.Get(serviceName)

@@ -99,7 +99,7 @@ func (s *Server) setupRouter() {
 	r.Get("/openapi.json", handler.NewOpenAPIHandler(s.registry, s.store).ServeCombinedSpec)
 
 	// --- MCP Streamable HTTP endpoint (remote AI agent access) ---
-	mcpSrv := fmcp.NewMCPServer(s.registry, s.store, s.logger)
+	mcpSrv := fmcp.NewMCPServer(s.registry, s.store, s.authSvc, s.logger)
 	mcpHandler := mcpSrv.HTTPHandler()
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Authenticate(s.authSvc))
@@ -172,6 +172,7 @@ func (s *Server) setupRouter() {
 		// Dynamic database service APIs
 		r.Route("/{serviceName}", func(r chi.Router) {
 			r.Use(middleware.Authenticate(s.authSvc))
+			r.Use(middleware.RequireAccess(s.authSvc))
 
 			tableHandler := handler.NewTableHandler(s.registry, s.store)
 			schemaHandler := handler.NewSchemaHandler(s.registry, s.store)

@@ -81,6 +81,9 @@ func runKeyCreate(roleName, label string) error {
 	if matchedRole == nil {
 		return fmt.Errorf("role %q not found", roleName)
 	}
+	if len(matchedRole.Access) == 0 {
+		fmt.Fprintf(os.Stderr, "warning: role %q has no access rules; this key will be denied until rules are added\n", roleName)
+	}
 
 	// Generate 32 random bytes, hex encode, prefix with "faucet_"
 	randomBytes := make([]byte, 32)
@@ -96,11 +99,11 @@ func runKeyCreate(roleName, label string) error {
 	keyPrefix := rawKey[:15]
 
 	apiKey := &model.APIKey{
-		KeyHash:  keyHash,
+		KeyHash:   keyHash,
 		KeyPrefix: keyPrefix,
-		Label:    label,
-		RoleID:   matchedRole.ID,
-		IsActive: true,
+		Label:     label,
+		RoleID:    matchedRole.ID,
+		IsActive:  true,
 	}
 
 	if err := store.CreateAPIKey(ctx, apiKey); err != nil {

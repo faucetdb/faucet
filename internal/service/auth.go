@@ -16,6 +16,7 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrTokenExpired       = errors.New("token expired")
 	ErrKeyRevoked         = errors.New("api key revoked")
+	ErrForbidden          = errors.New("forbidden")
 )
 
 type APIKeyPrincipal struct {
@@ -64,6 +65,24 @@ func (s *AuthService) ValidateAPIKey(ctx context.Context, rawKey string) (*APIKe
 		KeyID:  key.ID,
 		RoleID: key.RoleID,
 	}, nil
+}
+
+// Authorize checks whether the role permits verb on the given component of
+// serviceName. It returns ErrForbidden when the role is missing, inactive, or
+// has no matching rule granting the verb. The role is loaded per request so
+// that rule changes take effect immediately without key rotation.
+func (s *AuthService) Authorize(ctx context.Context, roleID int64, serviceName, component string, verb int) error {
+	role, err := s.store.GetRole(ctx, roleID)
+	if err != nil {
+		if errors.Is(err, config.ErrNotFound) {
+			return ErrForbidden
+		}
+		return err
+	}
+	if !role.Allows(serviceName, component, verb) {
+		return ErrForbidden
+	}
+	return nil
 }
 
 // ValidateJWT verifies a JWT bearer token and returns the associated admin identity.

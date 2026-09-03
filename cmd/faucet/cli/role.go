@@ -131,26 +131,42 @@ func newRoleCreateCmd() *cobra.Command {
 	var (
 		name        string
 		description string
+		access      []string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new role",
-		Example: `  faucet role create --name readonly --description "Read-only access to all services"
-  faucet role create --name admin --description "Full access"`,
+		Long: `Create a role. A role grants nothing until it has access rules, so pass
+--access one or more times as SERVICE:COMPONENT:VERBS, where SERVICE and
+COMPONENT may be * and VERBS is a comma-separated list of GET, POST, PUT,
+PATCH, DELETE or * for all.`,
+		Example: `  faucet role create --name readonly --access "*:*:GET"
+  faucet role create --name orders --access "mydb:_table/orders:GET,POST,PATCH"
+  faucet role create --name admin --access "*:*:*"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoleCreate(name, description)
+			return runRoleCreate(name, description, access)
 		},
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", "Role name (required)")
 	cmd.Flags().StringVar(&description, "description", "", "Role description")
+	cmd.Flags().StringArrayVar(&access, "access", nil, "Access rule SERVICE:COMPONENT:VERBS (repeatable)")
 	cmd.MarkFlagRequired("name")
 
 	return cmd
 }
 
-func runRoleCreate(name, description string) error {
+func runRoleCreate(name, description string, accessSpecs []string) error {
+	rules := make([]model.RoleAccess, 0, len(accessSpecs))
+	for _, spec := range accessSpecs {
+		rule, err := parseAccessSpec(spec)
+		if err != nil {
+			return err
+		}
+		rules = append(rules, rule)
+	}
+
 	store, err := openConfigStore()
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
@@ -168,10 +184,68 @@ func runRoleCreate(name, description string) error {
 	if err := store.CreateRole(ctx, role); err != nil {
 		return fmt.Errorf("create role: %w", err)
 	}
+	if len(rules) > 0 {
+		if err := store.SetRoleAccess(ctx, role.ID, rules); err != nil {
+			return fmt.Errorf("set role access: %w", err)
+		}
+	}
 
 	fmt.Printf("Created role %q (id=%d)\n", name, role.ID)
 	if description != "" {
 		fmt.Printf("  description: %s\n", description)
 	}
+	for _, r := range rules {
+		fmt.Printf("  access: %s:%s:%s\n", r.ServiceName, r.Component, verbNames(r.VerbMask))
+	}
+	if len(rules) == 0 {
+		fmt.Println("  warning: no access rules; keys bound to this role will be denied until rules are added (--access or the admin UI)")
+	}
 	return nil
+}
+
+// parseAccessSpec parses SERVICE:COMPONENT:VERBS into an access rule.
+func parseAccessSpec(spec string) (model.RoleAccess, error) {
+	parts := strings.SplitN(spec, ":", 3)
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return model.RoleAccess{}, fmt.Errorf("invalid --access %q: want SERVICE:COMPONENT:VERBS, e.g. \"*:_table/*:GET\"", spec)
+	}
+	mask := 0
+	for _, v := range strings.Split(parts[2], ",") {
+		v = strings.ToUpper(strings.TrimSpace(v))
+		if v == "*" {
+			mask = model.VerbAll
+			continue
+		}
+		bit := model.VerbFromMethod(v)
+		if bit == 0 {
+			return model.RoleAccess{}, fmt.Errorf("invalid --access %q: unknown verb %q (use GET, POST, PUT, PATCH, DELETE or *)", spec, v)
+		}
+		mask |= bit
+	}
+	return model.RoleAccess{
+		ServiceName: parts[0],
+		Component:   parts[1],
+		VerbMask:    mask,
+		// Defaults mirror the role_access column defaults used by the API.
+		RequestorMask: model.RequestorAPI,
+		Filters:       []model.Filter{},
+		FilterOp:      "AND",
+	}, nil
+}
+
+// verbNames renders a verb mask as a comma-separated method list.
+func verbNames(mask int) string {
+	if mask == model.VerbAll {
+		return "*"
+	}
+	var names []string
+	for _, v := range []int{model.VerbGet, model.VerbPost, model.VerbPut, model.VerbPatch, model.VerbDelete} {
+		if mask&v != 0 {
+			names = append(names, model.VerbName(v))
+		}
+	}
+	if len(names) == 0 {
+		return "none"
+	}
+	return strings.Join(names, ",")
 }

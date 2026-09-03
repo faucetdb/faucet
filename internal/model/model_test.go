@@ -519,3 +519,99 @@ func TestColumnFields(t *testing.T) {
 		t.Error("max_length should be omitted when nil")
 	}
 }
+
+func TestVerbFromMethod(t *testing.T) {
+	cases := map[string]int{
+		"GET": VerbGet, "HEAD": VerbGet, "POST": VerbPost, "PUT": VerbPut,
+		"PATCH": VerbPatch, "DELETE": VerbDelete, "OPTIONS": 0, "": 0,
+	}
+	for method, want := range cases {
+		if got := VerbFromMethod(method); got != want {
+			t.Errorf("VerbFromMethod(%q) = %d, want %d", method, got, want)
+		}
+	}
+}
+
+func TestMatchComponent(t *testing.T) {
+	cases := []struct {
+		pattern, component string
+		want               bool
+	}{
+		{"*", "_table/users", true},
+		{"", "_table/users", false},
+		{"", "", false},
+		{"*", "", true},
+		{"_table/users", "_table/users", true},
+		{"_table/users", "_table/orders", false},
+		{"_table/users", "_table/users/extra", false},
+		{"_table/*", "_table", true},
+		{"_table/*", "_table/users", true},
+		{"_table/*", "_tables", false},
+		{"_table/*", "_schema/users", false},
+		{"_table", "_table/users", false},
+	}
+	for _, c := range cases {
+		if got := MatchComponent(c.pattern, c.component); got != c.want {
+			t.Errorf("MatchComponent(%q, %q) = %v, want %v", c.pattern, c.component, got, c.want)
+		}
+	}
+}
+
+func TestRoleAllows(t *testing.T) {
+	readOnly := &Role{IsActive: true, Access: []RoleAccess{
+		{ServiceName: "*", Component: "*", VerbMask: VerbGet},
+	}}
+	if !readOnly.Allows("db", "_table/users", VerbGet) {
+		t.Error("read-only role should allow GET")
+	}
+	for _, v := range []int{VerbPost, VerbPut, VerbPatch, VerbDelete} {
+		if readOnly.Allows("db", "_table/users", v) {
+			t.Errorf("read-only role should deny %s", VerbName(v))
+		}
+	}
+
+	// Rules are additive across matching entries.
+	split := &Role{IsActive: true, Access: []RoleAccess{
+		{ServiceName: "db", Component: "_table/*", VerbMask: VerbGet},
+		{ServiceName: "db", Component: "_table/users", VerbMask: VerbPatch},
+		{ServiceName: "other", Component: "*", VerbMask: VerbAll},
+	}}
+	if !split.Allows("db", "_table/users", VerbPatch) || !split.Allows("db", "_table/orders", VerbGet) {
+		t.Error("expected matching rules to grant access")
+	}
+	if split.Allows("db", "_table/orders", VerbPatch) || split.Allows("db", "_schema", VerbGet) {
+		t.Error("expected non-matching component to be denied")
+	}
+	if split.Allows("third", "_table/users", VerbGet) {
+		t.Error("expected non-matching service to be denied")
+	}
+
+	// A combined verb requires every bit.
+	if split.Allows("other", "_table/x", VerbAll) != true || readOnly.Allows("db", "*", VerbAll) {
+		t.Error("VerbAll must require every verb bit")
+	}
+
+	// Empty, zero-mask, inactive and nil roles grant nothing.
+	if (&Role{IsActive: true}).Allows("db", "_table/users", VerbGet) {
+		t.Error("role without rules should deny")
+	}
+	zero := &Role{IsActive: true, Access: []RoleAccess{{ServiceName: "*", Component: "*", VerbMask: 0}}}
+	if zero.Allows("db", "_table/users", VerbGet) {
+		t.Error("verb_mask 0 should deny")
+	}
+	inactive := &Role{IsActive: false, Access: []RoleAccess{{ServiceName: "*", Component: "*", VerbMask: VerbAll}}}
+	if inactive.Allows("db", "_table/users", VerbGet) {
+		t.Error("inactive role should deny")
+	}
+	var nilRole *Role
+	if nilRole.Allows("db", "_table/users", VerbGet) {
+		t.Error("nil role should deny")
+	}
+	if readOnly.Allows("db", "_table/users", 0) {
+		t.Error("unknown verb should deny")
+	}
+	blank := &Role{IsActive: true, Access: []RoleAccess{{ServiceName: "", Component: "*", VerbMask: VerbAll}}}
+	if blank.Allows("db", "_table/users", VerbGet) {
+		t.Error("blank service_name should deny")
+	}
+}

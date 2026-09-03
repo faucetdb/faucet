@@ -99,7 +99,7 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 ### Security & Access Control
 - **API key authentication** — SHA-256 hashed keys with per-key role assignment
 - **JWT authentication** — HMAC-SHA256 signed tokens for admin sessions
-- **Role-based access control (RBAC)** — Per-table verb permissions (GET, POST, PUT, DELETE)
+- **Role-based access control (RBAC)** — Per-table verb permissions (GET, POST, PUT, PATCH, DELETE), enforced for REST and MCP
 - **Row-level security filters** — Restrict data access per role with SQL filter expressions
 - **Schema contract locking** — Lock your API contract against silent breaking schema changes with three modes (none, auto, strict), drift detection, and CLI management
 
@@ -170,8 +170,9 @@ faucet admin create --email admin@example.com --password changeme123
 # Add a database
 faucet db add mydb --driver postgres --dsn "postgres://user:pass@localhost/mydb?sslmode=disable"
 
-# Create an API key
-faucet key create --role default
+# Create a read-only role and an API key bound to it
+faucet role create --name readonly --access "*:*:GET"
+faucet key create --role readonly
 
 # Query your data
 curl -H "X-API-Key: faucet_YOUR_KEY_HERE" http://localhost:8080/api/v1/mydb/_table/users?limit=10
@@ -202,9 +203,13 @@ Add to your `claude_desktop_config.json`:
 
 ### HTTP Mode (remote clients)
 
+Remote clients should use the `/mcp` endpoint of the REST server (`faucet serve`), which authenticates with `X-API-Key` or a Bearer token and enforces the key's role.
+
 ```bash
 faucet mcp --transport http --port 3001
 ```
+
+> **Warning:** the standalone `--transport http` listener above has **no authentication or role enforcement**. Only bind it on a trusted network.
 
 ### Available MCP Tools
 
@@ -235,7 +240,7 @@ faucet db diff NAME             # Show schema drift
 faucet db promote NAME          # Promote contracts to match live schema
 faucet key create               # Create API key
 faucet key list                 # List API keys
-faucet role create              # Create RBAC role
+faucet role create              # Create RBAC role (--access SERVICE:COMPONENT:VERBS)
 faucet admin create             # Create admin account
 faucet mcp                      # Start MCP server (stdio)
 faucet openapi                  # Generate OpenAPI spec
@@ -283,6 +288,39 @@ POST   /api/v1/{service}/_proc/{proc}            # Call procedure
 | `include_count` | `true` | Include total record count in response metadata |
 
 ---
+
+## Roles & Access Rules
+
+Every API key is bound to a role, and a role is a list of access rules. A request is allowed only if at least one rule matches the service and component and grants the request's HTTP verb. A role with no rules, or an inactive role, grants nothing. Admin sessions (JWT) are not subject to access rules.
+
+```bash
+faucet role create --name readonly --access "*:*:GET"
+faucet role create --name orders --access "mydb:_table/orders:GET,POST,PATCH" --access "mydb:_schema/*:GET"
+```
+
+The same rules can be set from the admin UI or the API:
+
+```json
+PUT /api/v1/system/role/{id}
+{
+  "name": "readonly",
+  "is_active": true,
+  "access": [
+    { "service_name": "*",    "component": "_table/*",      "verb_mask": 1 },
+    { "service_name": "mydb", "component": "_table/orders", "verb_mask": 11 }
+  ]
+}
+```
+
+| Field | Values |
+|-------|--------|
+| `service_name` | `*` for all services, or an exact service name |
+| `component` | `*` for everything; `_table/*` for the table list and every table; `_table/users`, `_schema/users`, `_proc/refresh` for one resource |
+| `verb_mask` | Bit mask: GET = 1, POST = 2, PUT = 4, PATCH = 8, DELETE = 16 (all = 31) |
+
+MCP tools on the `/mcp` endpoint map to the same rules: `faucet_query` needs GET on `_table/{table}`, `faucet_insert` POST, `faucet_update` PATCH, `faucet_delete` DELETE, `faucet_list_tables` and `faucet_describe_table` GET on `_schema`, and `faucet_raw_sql` needs all verbs on component `*` of the service.
+
+Only `service_name`, `component` and `verb_mask` are enforced today. The `filters` (row-level security) and `requestor_mask` fields are stored but not yet applied.
 
 ## FAQ
 

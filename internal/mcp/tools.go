@@ -10,6 +10,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/faucetdb/faucet/internal/connector"
+	"github.com/faucetdb/faucet/internal/model"
 	"github.com/faucetdb/faucet/internal/query"
 )
 
@@ -282,6 +283,10 @@ func (s *MCPServer) handleListTables(
 		return toolError("%v. Available services: %v", err, s.registry.ListServices())
 	}
 
+	if err := s.authorize(ctx, serviceName, "_schema", model.VerbGet); err != nil {
+		return toolError("%v", err)
+	}
+
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
 		return toolError("Service %q not found. Available services: %v",
@@ -357,6 +362,10 @@ func (s *MCPServer) handleDescribeTable(
 		return toolError("%v", err)
 	}
 
+	if err := s.authorize(ctx, serviceName, "_schema/"+tableName, model.VerbGet); err != nil {
+		return toolError("%v", err)
+	}
+
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
 		return toolError("Service %q not found. Available services: %v",
@@ -397,6 +406,10 @@ func (s *MCPServer) handleQuery(
 	offset := optionalInt(request, "offset", 0)
 	if offset < 0 {
 		offset = 0
+	}
+
+	if err := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbGet); err != nil {
+		return toolError("%v", err)
 	}
 
 	conn, err := s.registry.Get(serviceName)
@@ -531,6 +544,10 @@ func (s *MCPServer) handleInsert(
 		return toolError("%v", err)
 	}
 
+	if err := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbPost); err != nil {
+		return toolError("%v", err)
+	}
+
 	// Check read-only status.
 	svc, err := s.store.GetServiceByName(ctx, serviceName)
 	if err == nil && svc.ReadOnly {
@@ -626,6 +643,10 @@ func (s *MCPServer) handleUpdate(
 	if err != nil {
 		return toolError("A filter is required for update operations to prevent " +
 			"accidental full-table updates. Example: id = 42")
+	}
+
+	if err := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbPatch); err != nil {
+		return toolError("%v", err)
 	}
 
 	// Check read-only status.
@@ -735,6 +756,10 @@ func (s *MCPServer) handleDelete(
 			"accidental full-table deletes. Example: id = 42")
 	}
 
+	if err := s.authorize(ctx, serviceName, "_table/"+tableName, model.VerbDelete); err != nil {
+		return toolError("%v", err)
+	}
+
 	// Check read-only status.
 	svc, err := s.store.GetServiceByName(ctx, serviceName)
 	if err == nil && svc.ReadOnly {
@@ -805,6 +830,12 @@ func (s *MCPServer) handleRawSQL(
 	params := getAnySliceArg(request, "params")
 	timeoutSec := optionalInt(request, "timeout", 30)
 	limit := clamp(optionalInt(request, "limit", 100), 1, 10000)
+
+	// Raw SQL can express any statement, so the role must hold every verb on
+	// the whole service rather than on a single component.
+	if err := s.authorize(ctx, serviceName, "*", model.VerbAll); err != nil {
+		return toolError("%v", err)
+	}
 
 	// Check that the service allows raw SQL.
 	svc, err := s.store.GetServiceByName(ctx, serviceName)

@@ -2,9 +2,14 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/faucetdb/faucet/internal/model"
 	"github.com/faucetdb/faucet/internal/service"
 )
 
@@ -95,6 +100,57 @@ func RequireAdmin() func(http.Handler) http.Handler {
 	}
 }
 
+// RequireAccess returns an HTTP middleware that enforces the role's access
+// rules for database service routes. It must be mounted inside the
+// /{serviceName} route group, after Authenticate. Admin principals bypass
+// the check; API-key principals must hold a rule granting the request's HTTP
+// verb on the requested component (the path below the service name, e.g.
+// "_table/users"). Denied requests receive a 403 JSON error. The check runs
+// before the sub-router matches a route, so a key without a matching rule
+// gets 403 even for unknown paths; that hides 404/405 but leaks nothing.
+func RequireAccess(authSvc *service.AuthService) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			principal := GetPrincipal(r.Context())
+			if principal == nil {
+				writeAuthError(w, http.StatusUnauthorized, "Authentication required")
+				return
+			}
+			if principal.IsAdmin {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			serviceName := chi.URLParam(r, "serviceName")
+			component := serviceComponent(r)
+			verb := model.VerbFromMethod(r.Method)
+
+			err := authSvc.Authorize(r.Context(), principal.RoleID, serviceName, component, verb)
+			if err == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if errors.Is(err, service.ErrForbidden) {
+				writeAuthError(w, http.StatusForbidden,
+					"Role does not permit "+model.VerbName(verb)+" on "+serviceName+"/"+component)
+				return
+			}
+			writeAuthError(w, http.StatusInternalServerError, "Authorization check failed")
+		})
+	}
+}
+
+// serviceComponent returns the request path below the service segment,
+// without leading or trailing slashes. Chi exposes the remaining path of a
+// mounted sub-router as RoutePath, so this only works inside the
+// /{serviceName} route group.
+func serviceComponent(r *http.Request) string {
+	if rctx := chi.RouteContext(r.Context()); rctx != nil {
+		return strings.Trim(rctx.RoutePath, "/")
+	}
+	return ""
+}
+
 // GetPrincipal extracts the authenticated principal from the context.
 // Returns nil if no principal is present (i.e., unauthenticated request).
 func GetPrincipal(ctx context.Context) *Principal {
@@ -104,20 +160,16 @@ func GetPrincipal(ctx context.Context) *Principal {
 	return nil
 }
 
+// writeAuthError writes the standard error envelope. The handler package's
+// helper is not used here to avoid an import cycle; messages may contain
+// request-derived strings, so they are JSON-encoded rather than concatenated.
 func writeAuthError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	// Manually construct JSON to avoid import cycle with handler package
-	w.Write([]byte(`{"error":{"code":` + httpStatusString(status) + `,"message":"` + message + `"}}`))
-}
-
-func httpStatusString(code int) string {
-	switch code {
-	case 401:
-		return "401"
-	case 403:
-		return "403"
-	default:
-		return "500"
-	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"error": map[string]interface{}{
+			"code":    status,
+			"message": message,
+		},
+	})
 }

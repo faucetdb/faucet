@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,6 +67,44 @@ func newTestEnv(t *testing.T) *testEnv {
 		authSvc:  authSvc,
 		registry: registry,
 	}
+}
+
+// grantAccess replaces the role's access rules. Roles start with no rules,
+// which grants nothing, so tests that exercise service endpoints must grant
+// access explicitly.
+func (e *testEnv) grantAccess(t *testing.T, roleID int64, rules ...model.RoleAccess) {
+	t.Helper()
+	if err := e.store.SetRoleAccess(context.Background(), roleID, rules); err != nil {
+		t.Fatalf("SetRoleAccess: %v", err)
+	}
+}
+
+// fullAccess is an access rule granting every verb on every service.
+var fullAccess = model.RoleAccess{ServiceName: "*", Component: "*", VerbMask: model.VerbAll}
+
+// seedAPIKey creates a role with the given rules and an API key bound to it,
+// returning the raw key.
+func (e *testEnv) seedAPIKey(t *testing.T, roleName string, rules ...model.RoleAccess) string {
+	t.Helper()
+	ctx := context.Background()
+	role := &model.Role{Name: roleName, IsActive: true}
+	if err := e.store.CreateRole(ctx, role); err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+	e.grantAccess(t, role.ID, rules...)
+
+	rawKey := "faucet_" + roleName + "_0123456789abcdef0123456789"
+	apiKey := &model.APIKey{
+		KeyHash:   config.HashAPIKey(rawKey),
+		KeyPrefix: rawKey[:15],
+		Label:     roleName,
+		RoleID:    role.ID,
+		IsActive:  true,
+	}
+	if err := e.store.CreateAPIKey(ctx, apiKey); err != nil {
+		t.Fatalf("CreateAPIKey: %v", err)
+	}
+	return rawKey
 }
 
 // seedAdmin creates a default admin account and returns it.
@@ -885,6 +924,7 @@ func TestServiceEndpoint_APIKeyAuth(t *testing.T) {
 	if err := env.store.CreateRole(ctx, role); err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
+	env.grantAccess(t, role.ID, fullAccess)
 
 	rawKey := "faucet_integrationtestapikey12345"
 	keyHash := config.HashAPIKey(rawKey)
@@ -1068,6 +1108,9 @@ func TestFullWorkflow(t *testing.T) {
 	roleBody := jsonBody(t, map[string]interface{}{
 		"name":        "demo-reader",
 		"description": "Read access to demo",
+		"access": []map[string]interface{}{
+			{"service_name": "demo", "component": "*", "verb_mask": model.VerbGet},
+		},
 	})
 	rr = env.doAuth(t, "POST", "/api/v1/system/role", roleBody, token)
 	assertStatus(t, rr, http.StatusCreated)
@@ -1811,6 +1854,7 @@ func newTestEnvWithSQLite(t *testing.T) (*testEnv, string) {
 	if err := env.store.CreateRole(ctx, role); err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
+	env.grantAccess(t, role.ID, fullAccess)
 
 	rawKey := "faucet_sqltestkey1234567890abcdef"
 	apiKey := &model.APIKey{
@@ -1952,5 +1996,288 @@ func TestDataAPI_FilterDelete(t *testing.T) {
 	decodeJSON(t, rr, &resp)
 	if resp.Meta.Total == nil || *resp.Meta.Total != 2 {
 		t.Errorf("expected 2 remaining users, got %v", resp.Meta.Total)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RBAC enforcement tests (issue #3: verb_mask not enforced for API keys)
+// ---------------------------------------------------------------------------
+
+func TestRBAC_ReadOnlyRoleCannotWrite(t *testing.T) {
+	env, _ := newTestEnvWithSQLite(t)
+	rawKey := env.seedAPIKey(t, "readonly",
+		model.RoleAccess{ServiceName: "*", Component: "*", VerbMask: model.VerbGet})
+
+	rr := env.doAPIKey(t, "GET", "/api/v1/testdb/_table/users", nil, rawKey)
+	assertStatus(t, rr, http.StatusOK)
+
+	body := jsonBody(t, map[string]interface{}{"city": "x"})
+	rr = env.doAPIKey(t, "PATCH", "/api/v1/testdb/_table/users?filter=id%3D-99999", body, rawKey)
+	assertStatus(t, rr, http.StatusForbidden)
+
+	rr = env.doAPIKey(t, "DELETE", "/api/v1/testdb/_table/users?filter=id%3D-99999", nil, rawKey)
+	assertStatus(t, rr, http.StatusForbidden)
+
+	body = jsonBody(t, map[string]interface{}{"resource": []map[string]interface{}{{"name": "Eve", "email": "eve@example.com"}}})
+	rr = env.doAPIKey(t, "POST", "/api/v1/testdb/_table/users", body, rawKey)
+	assertStatus(t, rr, http.StatusForbidden)
+
+	rr = env.doAPIKey(t, "POST", "/api/v1/testdb/_schema", jsonBody(t, map[string]interface{}{}), rawKey)
+	assertStatus(t, rr, http.StatusForbidden)
+
+	body = jsonBody(t, map[string]interface{}{"resource": []map[string]interface{}{{"id": -99999, "name": "x", "email": "x@example.com"}}})
+	rr = env.doAPIKey(t, "PUT", "/api/v1/testdb/_table/users?filter=id%3D-99999", body, rawKey)
+	assertStatus(t, rr, http.StatusForbidden)
+
+	rr = env.doAPIKey(t, "PUT", "/api/v1/testdb/_schema/users", jsonBody(t, map[string]interface{}{}), rawKey)
+	assertStatus(t, rr, http.StatusForbidden)
+	rr = env.doAPIKey(t, "DELETE", "/api/v1/testdb/_schema/users", nil, rawKey)
+	assertStatus(t, rr, http.StatusForbidden)
+
+	rr = env.doAPIKey(t, "POST", "/api/v1/testdb/_proc/anything", jsonBody(t, map[string]interface{}{}), rawKey)
+	assertStatus(t, rr, http.StatusForbidden)
+
+	// Read endpoints beyond _table stay open to a GET-only role.
+	rr = env.doAPIKey(t, "GET", "/api/v1/testdb/_schema/users", nil, rawKey)
+	assertStatus(t, rr, http.StatusOK)
+	rr = env.doAPIKey(t, "GET", "/api/v1/testdb/_doc", nil, rawKey)
+	assertStatus(t, rr, http.StatusOK)
+
+	// The 403 must come from Faucet, not the database: no row may have changed.
+	rr = env.doAPIKey(t, "GET", "/api/v1/testdb/_table/users?fields=name", nil, rawKey)
+	assertStatus(t, rr, http.StatusOK)
+	var resp model.ListResponse
+	decodeJSON(t, rr, &resp)
+	if resp.Meta.Count != 3 {
+		t.Errorf("expected 3 users untouched, got %d", resp.Meta.Count)
+	}
+
+	var errResp struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	rr = env.doAPIKey(t, "DELETE", "/api/v1/testdb/_table/users?filter=id%3D-99999", nil, rawKey)
+	decodeJSON(t, rr, &errResp)
+	if errResp.Error.Code != 403 || errResp.Error.Message != "Role does not permit DELETE on testdb/_table/users" {
+		t.Errorf("unexpected error body: %+v", errResp)
+	}
+}
+
+func TestRBAC_NoRulesGrantsNothing(t *testing.T) {
+	env, _ := newTestEnvWithSQLite(t)
+
+	noRules := env.seedAPIKey(t, "norules")
+	rr := env.doAPIKey(t, "GET", "/api/v1/testdb/_table/users", nil, noRules)
+	assertStatus(t, rr, http.StatusForbidden)
+
+	zeroMask := env.seedAPIKey(t, "zeromask",
+		model.RoleAccess{ServiceName: "*", Component: "*", VerbMask: 0})
+	rr = env.doAPIKey(t, "GET", "/api/v1/testdb/_table/users", nil, zeroMask)
+	assertStatus(t, rr, http.StatusForbidden)
+}
+
+func TestRBAC_InactiveRoleDenied(t *testing.T) {
+	env, _ := newTestEnvWithSQLite(t)
+	rawKey := env.seedAPIKey(t, "inactive", fullAccess)
+
+	role, err := env.store.GetRoleByName(context.Background(), "inactive")
+	if err != nil {
+		t.Fatalf("GetRoleByName: %v", err)
+	}
+	role.IsActive = false
+	if err := env.store.UpdateRole(context.Background(), role); err != nil {
+		t.Fatalf("UpdateRole: %v", err)
+	}
+
+	rr := env.doAPIKey(t, "GET", "/api/v1/testdb/_table/users", nil, rawKey)
+	assertStatus(t, rr, http.StatusForbidden)
+}
+
+func TestRBAC_ServiceAndComponentScoping(t *testing.T) {
+	env, _ := newTestEnvWithSQLite(t)
+
+	// Exact table rule: only that table, not the table list or schema.
+	exact := env.seedAPIKey(t, "exact",
+		model.RoleAccess{ServiceName: "testdb", Component: "_table/users", VerbMask: model.VerbGet})
+	rr := env.doAPIKey(t, "GET", "/api/v1/testdb/_table/users", nil, exact)
+	assertStatus(t, rr, http.StatusOK)
+	rr = env.doAPIKey(t, "GET", "/api/v1/testdb/_table", nil, exact)
+	assertStatus(t, rr, http.StatusForbidden)
+	rr = env.doAPIKey(t, "GET", "/api/v1/testdb/_schema/users", nil, exact)
+	assertStatus(t, rr, http.StatusForbidden)
+
+	// Wildcard component rule covers the list endpoint and every table.
+	wild := env.seedAPIKey(t, "wild",
+		model.RoleAccess{ServiceName: "testdb", Component: "_table/*", VerbMask: model.VerbGet})
+	rr = env.doAPIKey(t, "GET", "/api/v1/testdb/_table", nil, wild)
+	assertStatus(t, rr, http.StatusOK)
+	rr = env.doAPIKey(t, "GET", "/api/v1/testdb/_table/users", nil, wild)
+	assertStatus(t, rr, http.StatusOK)
+	rr = env.doAPIKey(t, "GET", "/api/v1/testdb/_schema", nil, wild)
+	assertStatus(t, rr, http.StatusForbidden)
+
+	// Rule for another service grants nothing here.
+	other := env.seedAPIKey(t, "other", model.RoleAccess{ServiceName: "otherdb", Component: "*", VerbMask: model.VerbAll})
+	rr = env.doAPIKey(t, "GET", "/api/v1/testdb/_table/users", nil, other)
+	assertStatus(t, rr, http.StatusForbidden)
+}
+
+func TestRBAC_AdminBypassesRules(t *testing.T) {
+	env, _ := newTestEnvWithSQLite(t)
+	token := env.adminToken(t)
+
+	body := jsonBody(t, map[string]interface{}{"city": "Houston"})
+	rr := env.doAuth(t, "PATCH", "/api/v1/testdb/_table/users?filter=id%3D-99999", body, token)
+	assertStatus(t, rr, http.StatusOK)
+}
+
+func TestRBAC_RuleChangeAppliesImmediately(t *testing.T) {
+	env, _ := newTestEnvWithSQLite(t)
+	rawKey := env.seedAPIKey(t, "upgraded",
+		model.RoleAccess{ServiceName: "*", Component: "*", VerbMask: model.VerbGet})
+
+	body := jsonBody(t, map[string]interface{}{"city": "Houston"})
+	rr := env.doAPIKey(t, "PATCH", "/api/v1/testdb/_table/users?filter=id%3D-99999", body, rawKey)
+	assertStatus(t, rr, http.StatusForbidden)
+
+	role, err := env.store.GetRoleByName(context.Background(), "upgraded")
+	if err != nil {
+		t.Fatalf("GetRoleByName: %v", err)
+	}
+	env.grantAccess(t, role.ID,
+		model.RoleAccess{ServiceName: "*", Component: "*", VerbMask: model.VerbGet | model.VerbPatch})
+
+	body = jsonBody(t, map[string]interface{}{"city": "Houston"})
+	rr = env.doAPIKey(t, "PATCH", "/api/v1/testdb/_table/users?filter=id%3D-99999", body, rawKey)
+	assertStatus(t, rr, http.StatusOK)
+}
+
+func TestRBAC_MCPToolsRespectRole(t *testing.T) {
+	env, _ := newTestEnvWithSQLite(t)
+	rawKey := env.seedAPIKey(t, "mcpreadonly",
+		model.RoleAccess{ServiceName: "*", Component: "*", VerbMask: model.VerbGet})
+
+	ts := httptest.NewServer(env.server.Router())
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mcpC, err := mcpClient.NewStreamableHttpClient(
+		ts.URL+"/mcp",
+		mcpTransport.WithHTTPHeaders(map[string]string{"X-API-Key": rawKey}),
+	)
+	if err != nil {
+		t.Fatalf("NewStreamableHttpClient: %v", err)
+	}
+	if err := mcpC.Start(ctx); err != nil {
+		t.Fatalf("client.Start: %v", err)
+	}
+	defer mcpC.Close()
+
+	initReq := mcp.InitializeRequest{}
+	initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initReq.Params.ClientInfo = mcp.Implementation{Name: "rbac-test", Version: "1.0.0"}
+	if _, err := mcpC.Initialize(ctx, initReq); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+
+	call := func(name string, args map[string]interface{}) *mcp.CallToolResult {
+		t.Helper()
+		res, err := mcpC.CallTool(ctx, mcp.CallToolRequest{
+			Params: mcp.CallToolParams{Name: name, Arguments: args},
+		})
+		if err != nil {
+			t.Fatalf("CallTool(%s): %v", name, err)
+		}
+		return res
+	}
+	text := func(res *mcp.CallToolResult) string {
+		if len(res.Content) == 0 {
+			return ""
+		}
+		tc, _ := res.Content[0].(mcp.TextContent)
+		return tc.Text
+	}
+
+	res := call("faucet_query", map[string]interface{}{"service": "testdb", "table": "users"})
+	if res.IsError {
+		t.Errorf("faucet_query should be allowed for read-only role: %s", text(res))
+	}
+
+	for _, tc := range []struct {
+		tool string
+		args map[string]interface{}
+	}{
+		{"faucet_insert", map[string]interface{}{"service": "testdb", "table": "users",
+			"records": []map[string]interface{}{{"name": "Eve", "email": "eve@example.com"}}}},
+		{"faucet_update", map[string]interface{}{"service": "testdb", "table": "users",
+			"filter": "id = -99999", "record": map[string]interface{}{"city": "x"}}},
+		{"faucet_delete", map[string]interface{}{"service": "testdb", "table": "users", "filter": "id = -99999"}},
+		{"faucet_raw_sql", map[string]interface{}{"service": "testdb", "sql": "SELECT 1"}},
+	} {
+		res := call(tc.tool, tc.args)
+		if !res.IsError || !strings.Contains(text(res), "access denied") {
+			t.Errorf("%s should be denied for read-only role, got isError=%v text=%q", tc.tool, res.IsError, text(res))
+		}
+	}
+
+	// Nothing was written.
+	rr := env.doAPIKey(t, "GET", "/api/v1/testdb/_table/users", nil, rawKey)
+	assertStatus(t, rr, http.StatusOK)
+	var resp model.ListResponse
+	decodeJSON(t, rr, &resp)
+	if resp.Meta.Count != 3 {
+		t.Errorf("expected 3 users untouched, got %d", resp.Meta.Count)
+	}
+}
+
+func TestRBAC_MCPRawSQLNeedsWholeService(t *testing.T) {
+	env, _ := newTestEnvWithSQLite(t)
+	// Full verbs on every table is still not enough for raw SQL.
+	rawKey := env.seedAPIKey(t, "tablesonly",
+		model.RoleAccess{ServiceName: "testdb", Component: "_table/*", VerbMask: model.VerbAll})
+
+	ts := httptest.NewServer(env.server.Router())
+	defer ts.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mcpC, err := mcpClient.NewStreamableHttpClient(ts.URL+"/mcp",
+		mcpTransport.WithHTTPHeaders(map[string]string{"X-API-Key": rawKey}))
+	if err != nil {
+		t.Fatalf("NewStreamableHttpClient: %v", err)
+	}
+	if err := mcpC.Start(ctx); err != nil {
+		t.Fatalf("client.Start: %v", err)
+	}
+	defer mcpC.Close()
+	initReq := mcp.InitializeRequest{}
+	initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initReq.Params.ClientInfo = mcp.Implementation{Name: "rbac-test", Version: "1.0.0"}
+	if _, err := mcpC.Initialize(ctx, initReq); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+
+	res, err := mcpC.CallTool(ctx, mcp.CallToolRequest{Params: mcp.CallToolParams{
+		Name: "faucet_raw_sql", Arguments: map[string]interface{}{"service": "testdb", "sql": "SELECT 1"}}})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	tc, _ := res.Content[0].(mcp.TextContent)
+	if !res.IsError || !strings.Contains(tc.Text, "access denied") {
+		t.Errorf("raw SQL should be denied without service-wide rule, got isError=%v text=%q", res.IsError, tc.Text)
+	}
+
+	res, err = mcpC.CallTool(ctx, mcp.CallToolRequest{Params: mcp.CallToolParams{
+		Name: "faucet_list_tables", Arguments: map[string]interface{}{"service": "testdb"}}})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	tc, _ = res.Content[0].(mcp.TextContent)
+	if !res.IsError || !strings.Contains(tc.Text, "access denied") {
+		t.Errorf("list_tables should be denied without _schema rule, got isError=%v text=%q", res.IsError, tc.Text)
 	}
 }

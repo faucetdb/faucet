@@ -83,8 +83,9 @@ func runMCP(transport string, port int) error {
 	}
 	defer registry.CloseAll()
 
-	// Create MCP server
-	mcpSrv := fmcp.NewMCPServer(registry, store, logger)
+	// Create MCP server. No auth layer runs in front of stdio/standalone HTTP
+	// mode, so there is no principal to authorize against.
+	mcpSrv := fmcp.NewMCPServer(registry, store, nil, logger)
 
 	switch transport {
 	case "stdio":
