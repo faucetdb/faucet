@@ -221,18 +221,32 @@ func sanitizeURLDSN(dsn string) string {
 	// Split userinfo into user and password at the FIRST ':'.
 	user := userinfo
 	pass := ""
+	hasPass := false
 	if ci := strings.IndexByte(userinfo, ':'); ci >= 0 {
 		user = userinfo[:ci]
 		pass = userinfo[ci+1:]
+		hasPass = true
 	}
 
-	// Re-encode. url.PathEscape is too aggressive; url.QueryEscape encodes
-	// spaces as '+' which isn't great for passwords. Use a manual approach:
-	// percent-encode only the characters that break URL parsing.
-	encodedUser := url.PathEscape(user)
-	encodedPass := url.PathEscape(pass)
+	// Decode first so the function is idempotent. It runs on create and again
+	// at every server start on the stored DSN, and users often paste DSNs
+	// that are already percent-encoded. Without this, "%40" becomes "%2540"
+	// and the password no longer matches. A raw "%" that is not a valid
+	// escape fails to decode and is kept as-is.
+	if u, err := url.PathUnescape(user); err == nil {
+		user = u
+	}
+	if p, err := url.PathUnescape(pass); err == nil {
+		pass = p
+	}
 
-	return scheme + "://" + encodedUser + ":" + encodedPass + "@" + hostpath + query
+	// url.Userinfo applies the RFC 3986 userinfo encoding, so '@', ':', '/',
+	// '#', '?' and '%' in the user or password are always escaped.
+	ui := url.User(user)
+	if hasPass {
+		ui = url.UserPassword(user, pass)
+	}
+	return scheme + "://" + ui.String() + "@" + hostpath + query
 }
 
 // SchemaChange represents a table alteration.
