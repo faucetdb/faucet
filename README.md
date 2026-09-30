@@ -170,6 +170,9 @@ faucet admin create --email admin@example.com --password changeme123
 # Add a database
 faucet db add mydb --driver postgres --dsn "postgres://user:pass@localhost/mydb?sslmode=disable"
 
+# ...or give the connection as fields instead of a connection string
+faucet db add --name mydb --driver postgres --host localhost --user app --password-prompt --database mydb --param sslmode=disable
+
 # Create a role that can read every service, then an API key bound to it
 faucet role create --name default --verbs GET
 faucet key create --role default

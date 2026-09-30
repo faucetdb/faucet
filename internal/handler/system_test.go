@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/faucetdb/faucet/internal/config"
@@ -241,6 +242,97 @@ func TestCreateService_Validation(t *testing.T) {
 			assertStatus(t, rr, http.StatusBadRequest)
 		})
 	}
+}
+
+func TestCreateService_ConnectionFields(t *testing.T) {
+	env := newTestEnv(t)
+
+	body := toJSON(t, map[string]interface{}{
+		"name":   "fielddb",
+		"driver": "postgres",
+		"connection": map[string]interface{}{
+			"host":     "db.local",
+			"port":     6543,
+			"user":     "app",
+			"password": "p@ss#word",
+			"database": "orders",
+			"params":   map[string]string{"sslmode": "disable"},
+		},
+	})
+	rr := env.do(t, "POST", "/api/v1/system/service", body)
+	assertStatus(t, rr, http.StatusCreated)
+
+	// The response must not echo the password or the plaintext fields.
+	if strings.Contains(rr.Body.String(), "p@ss") || strings.Contains(rr.Body.String(), `"connection"`) {
+		t.Errorf("response leaks connection fields: %s", rr.Body.String())
+	}
+
+	svc, err := env.store.GetServiceByName(context.Background(), "fielddb")
+	if err != nil {
+		t.Fatalf("GetServiceByName: %v", err)
+	}
+	want := "postgres://app:p%40ss%23word@db.local:6543/orders?sslmode=disable"
+	if svc.DSN != want {
+		t.Errorf("stored DSN = %q, want %q", svc.DSN, want)
+	}
+}
+
+func TestCreateService_ConnectionFieldsErrors(t *testing.T) {
+	env := newTestEnv(t)
+
+	tests := []struct {
+		name string
+		body map[string]interface{}
+	}{
+		{"both dsn and fields", map[string]interface{}{
+			"name": "a", "driver": "postgres", "dsn": "postgres://h/db",
+			"connection": map[string]interface{}{"host": "h"},
+		}},
+		{"fields without host", map[string]interface{}{
+			"name": "b", "driver": "mysql",
+			"connection": map[string]interface{}{"user": "root"},
+		}},
+		{"fields for sqlite", map[string]interface{}{
+			"name": "c", "driver": "sqlite",
+			"connection": map[string]interface{}{"host": "h"},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := env.do(t, "POST", "/api/v1/system/service", toJSON(t, tt.body))
+			assertStatus(t, rr, http.StatusBadRequest)
+		})
+	}
+}
+
+func TestUpdateService_ConnectionFields(t *testing.T) {
+	env := newTestEnv(t)
+
+	rr := env.do(t, "POST", "/api/v1/system/service", toJSON(t, map[string]interface{}{
+		"name": "upd", "driver": "mysql", "dsn": "root@tcp(old:3306)/app",
+	}))
+	assertStatus(t, rr, http.StatusCreated)
+
+	rr = env.do(t, "PUT", "/api/v1/system/service/upd", toJSON(t, map[string]interface{}{
+		"is_active": false,
+		"connection": map[string]interface{}{
+			"host": "new", "user": "root", "password": "pw", "database": "app",
+		},
+	}))
+	assertStatus(t, rr, http.StatusOK)
+
+	svc, err := env.store.GetServiceByName(context.Background(), "upd")
+	if err != nil {
+		t.Fatalf("GetServiceByName: %v", err)
+	}
+	if want := "root:pw@tcp(new:3306)/app"; svc.DSN != want {
+		t.Errorf("stored DSN = %q, want %q", svc.DSN, want)
+	}
+
+	rr = env.do(t, "PUT", "/api/v1/system/service/upd", toJSON(t, map[string]interface{}{
+		"connection": map[string]interface{}{"port": 3306},
+	}))
+	assertStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestCreateService_DuplicateName(t *testing.T) {

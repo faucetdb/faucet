@@ -1,6 +1,12 @@
 import { useState } from 'preact/hooks';
 import { route } from 'preact-router';
 import { apiFetch } from '../hooks/useApi';
+import {
+  ConnectionInput,
+  connectionPayload,
+  connectionReady,
+  emptyConnection,
+} from '../components/ConnectionInput';
 
 type Step = 'welcome' | 'admin' | 'database' | 'done';
 
@@ -25,7 +31,7 @@ export function Setup({ onComplete }: SetupProps = {}) {
   const [dbForm, setDbForm] = useState({
     name: '',
     driver: 'postgres',
-    dsn: '',
+    connection: { ...emptyConnection },
     schema: '',
   });
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +82,7 @@ export function Setup({ onComplete }: SetupProps = {}) {
       const body: Record<string, any> = {
         name: dbForm.name,
         driver: dbForm.driver,
-        dsn: dbForm.dsn,
+        ...connectionPayload(dbForm.connection),
       };
       if (dbForm.schema) {
         body.schema = dbForm.schema;
@@ -90,21 +96,6 @@ export function Setup({ onComplete }: SetupProps = {}) {
       setError(err instanceof Error ? err.message : 'Failed to add database');
     } finally {
       setSaving(false);
-    }
-  }
-
-  function dsnPlaceholder(driver: string): string {
-    switch (driver) {
-      case 'postgres':
-        return 'postgres://user:pass@localhost:5432/dbname?sslmode=disable';
-      case 'mysql':
-        return 'user:pass@tcp(localhost:3306)/dbname';
-      case 'mssql':
-        return 'sqlserver://user:pass@localhost:1433?database=dbname';
-      case 'snowflake':
-        return 'user:pass@account/dbname/schema?warehouse=wh';
-      default:
-        return '';
     }
   }
 
@@ -276,16 +267,11 @@ export function Setup({ onComplete }: SetupProps = {}) {
                   </div>
                 </div>
 
-                <div>
-                  <label class="block text-sm font-medium text-text-secondary mb-1.5">DSN (Connection String)</label>
-                  <input
-                    type="text"
-                    class="input w-full font-mono text-sm"
-                    placeholder={dsnPlaceholder(dbForm.driver)}
-                    value={dbForm.dsn}
-                    onInput={(e) => setDbForm({ ...dbForm, dsn: (e.target as HTMLInputElement).value })}
-                  />
-                </div>
+                <ConnectionInput
+                  driver={dbForm.driver}
+                  value={dbForm.connection}
+                  onChange={(connection) => setDbForm({ ...dbForm, connection })}
+                />
 
                 <div>
                   <label class="block text-sm font-medium text-text-secondary mb-1.5">
@@ -310,7 +296,7 @@ export function Setup({ onComplete }: SetupProps = {}) {
                 </button>
                 <button
                   onClick={handleDbSubmit}
-                  disabled={saving || !dbForm.name || !dbForm.dsn}
+                  disabled={saving || !dbForm.name || !connectionReady(dbForm.connection)}
                   class="btn-primary"
                 >
                   {saving ? 'Connecting...' : 'Connect & Finish'}

@@ -11,6 +11,9 @@ type ServiceConfig struct {
 	Driver    string     `json:"driver" db:"driver"` // postgres, mysql, mssql, oracle, snowflake, sqlite
 	DSN            string `json:"dsn,omitempty" db:"dsn"` // Accepted on input; omitted in list responses via serviceToMap
 	PrivateKeyPath string `json:"private_key_path,omitempty" db:"private_key_path"`
+	// Connection is an input-only alternative to DSN. When set (and DSN is
+	// empty) the API builds the DSN from these fields. It is never stored.
+	Connection     *ConnectionFields `json:"connection,omitempty" db:"-"`
 	Schema         string `json:"schema" db:"schema_name"`
 	ReadOnly   bool   `json:"read_only" db:"read_only"`
 	RawSQL     bool   `json:"raw_sql_allowed" db:"raw_sql_allowed"`
@@ -19,6 +22,18 @@ type ServiceConfig struct {
 	Pool      PoolConfig `json:"pool"`
 	CreatedAt time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
+}
+
+// ConnectionFields describes a database connection as individual values
+// instead of a single connection string. For Snowflake, Host holds the
+// account identifier. A zero Port means the driver default.
+type ConnectionFields struct {
+	Host     string            `json:"host"`
+	Port     int               `json:"port,omitempty"`
+	User     string            `json:"user,omitempty"`
+	Password string            `json:"password,omitempty"`
+	Database string            `json:"database,omitempty"`
+	Params   map[string]string `json:"params,omitempty"` // extra driver options, e.g. sslmode=disable
 }
 
 // PoolConfig controls the database connection pool behavior for a service.

@@ -2,6 +2,12 @@ import { useState, useEffect } from 'preact/hooks';
 import { Modal } from '../components/Modal';
 import { StatusBadge } from '../components/StatusBadge';
 import { apiFetch } from '../hooks/useApi';
+import {
+  ConnectionInput,
+  connectionPayload,
+  connectionReady,
+  emptyConnection,
+} from '../components/ConnectionInput';
 
 interface Service {
   name: string;
@@ -22,7 +28,7 @@ const DB_DRIVERS = [
 const emptyForm = {
   name: '',
   driver: 'postgres',
-  dsn: '',
+  connection: { ...emptyConnection },
   schema: '',
 };
 
@@ -83,7 +89,7 @@ export function Services() {
       const body: Record<string, any> = {
         name: form.name,
         driver: form.driver,
-        dsn: form.dsn,
+        ...connectionPayload(form.connection),
       };
       if (form.schema) {
         body.schema = form.schema;
@@ -114,34 +120,6 @@ export function Services() {
       loadServices();
     } catch {
       // ignore
-    }
-  }
-
-  function dsnPlaceholder(driver: string): string {
-    switch (driver) {
-      case 'postgres':
-        return 'postgres://user:pass@localhost:5432/dbname?sslmode=disable';
-      case 'mysql':
-        return 'user:pass@tcp(host:3306)/dbname';
-      case 'mssql':
-        return 'sqlserver://user:pass@localhost:1433?database=dbname';
-      case 'snowflake':
-        return 'user:pass@account/dbname/schema?warehouse=wh';
-      default:
-        return '';
-    }
-  }
-
-  function dsnHelpText(driver: string): string {
-    switch (driver) {
-      case 'mysql':
-        return 'Format: user:pass@tcp(host:port)/dbname — the tcp() wrapper is required';
-      case 'postgres':
-        return 'Format: postgres://user:pass@host:port/dbname?sslmode=disable';
-      case 'mssql':
-        return 'Format: sqlserver://user:pass@host:port?database=dbname';
-      default:
-        return 'Full connection string for the database';
     }
   }
 
@@ -294,17 +272,11 @@ export function Services() {
             </div>
           </div>
 
-          <div>
-            <label class="block text-sm font-medium text-text-secondary mb-1.5">DSN (Connection String)</label>
-            <input
-              type="text"
-              class="input w-full font-mono text-sm"
-              placeholder={dsnPlaceholder(form.driver)}
-              value={form.dsn}
-              onInput={(e) => setForm({ ...form, dsn: (e.target as HTMLInputElement).value })}
-            />
-            <p class="text-xs text-text-muted mt-1">{dsnHelpText(form.driver)}</p>
-          </div>
+          <ConnectionInput
+            driver={form.driver}
+            value={form.connection}
+            onChange={(connection) => setForm({ ...form, connection })}
+          />
 
           <div>
             <label class="block text-sm font-medium text-text-secondary mb-1.5">
@@ -330,7 +302,7 @@ export function Services() {
             </button>
             <button
               onClick={handleSave}
-              disabled={saving || !form.name || !form.dsn}
+              disabled={saving || !form.name || !connectionReady(form.connection)}
               class="btn-primary text-sm"
             >
               {saving ? 'Saving...' : 'Add Service'}

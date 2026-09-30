@@ -13,6 +13,7 @@ import (
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
+	"github.com/faucetdb/faucet/internal/connector/connstr"
 	"github.com/faucetdb/faucet/internal/model"
 	"github.com/faucetdb/faucet/internal/service"
 )
@@ -262,8 +263,14 @@ func (h *SystemHandler) CreateService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Driver is required")
 		return
 	}
+	// Accept either a connection string (dsn) or individual connection
+	// fields (connection: {host, port, user, password, database, params}).
+	if err := connstr.Resolve(&svc); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid connection: "+err.Error())
+		return
+	}
 	if svc.DSN == "" {
-		writeError(w, http.StatusBadRequest, "DSN is required")
+		writeError(w, http.StatusBadRequest, "DSN or connection fields are required")
 		return
 	}
 
@@ -345,6 +352,18 @@ func (h *SystemHandler) UpdateService(w http.ResponseWriter, r *http.Request) {
 	if err := readJSON(r, &updates); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
+	}
+
+	// Connection fields build a DSN for the service's driver (or the new
+	// driver, when the same request changes it).
+	if updates.Connection != nil {
+		if updates.Driver == "" {
+			updates.Driver = existing.Driver
+		}
+		if err := connstr.Resolve(&updates); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid connection: "+err.Error())
+			return
+		}
 	}
 
 	// Apply non-zero updates to the existing service.

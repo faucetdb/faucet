@@ -7,8 +7,10 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/faucetdb/faucet/internal/connector"
+	"github.com/faucetdb/faucet/internal/connector/connstr"
 	"github.com/faucetdb/faucet/internal/model"
 )
 
@@ -43,6 +45,8 @@ func newDBAddCmd() *cobra.Command {
 		label          string
 		schema         string
 		privateKeyPath string
+		conn           model.ConnectionFields
+		askPassword    bool
 	)
 
 	cmd := &cobra.Command{
@@ -51,12 +55,42 @@ func newDBAddCmd() *cobra.Command {
 		Long: `Add a new database service connection. Provide flags for non-interactive use,
 or omit them to be prompted interactively.
 
-Supported drivers: postgres, mysql, mssql, oracle, snowflake, sqlite`,
+Give the connection either as a single connection string (--dsn) or as
+individual fields (--host, --port, --user, --password, --database, --param).
+Faucet builds the connection string from the fields and escapes special
+characters in the password for you. For Snowflake, --host is the account
+identifier. Use --password-prompt to type the password without it going into
+your shell history.
+
+Supported drivers: postgres, mysql, mssql, oracle, snowflake, sqlite
+(sqlite takes --dsn only: the database file path)`,
 		Example: `  faucet db add --name mydb --driver postgres --dsn "postgres://user:pass@localhost/mydb"
+  faucet db add --name mydb --driver postgres --host localhost --user app --password-prompt --database mydb --param sslmode=disable
+  faucet db add --name shop --driver mysql --host db.internal --port 3307 --user root --database shop
   faucet db add --name analytics --driver snowflake --dsn "USER@org-account/DB/SCHEMA" --private-key-path /path/to/key.p8
   faucet db add  # interactive mode`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDBAdd(name, driver, dsn, label, schema, privateKeyPath)
+			fieldsSet := false
+			for _, f := range connFieldFlags {
+				if cmd.Flags().Changed(f) {
+					fieldsSet = true
+				}
+			}
+			if askPassword {
+				fmt.Print("Database password: ")
+				pw, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Println()
+				if err != nil {
+					return fmt.Errorf("read password: %w", err)
+				}
+				conn.Password = string(pw)
+				fieldsSet = true
+			}
+			var fields *model.ConnectionFields
+			if fieldsSet {
+				fields = &conn
+			}
+			return runDBAdd(name, driver, dsn, label, schema, privateKeyPath, fields)
 		},
 	}
 
@@ -67,10 +101,25 @@ Supported drivers: postgres, mysql, mssql, oracle, snowflake, sqlite`,
 	cmd.Flags().StringVar(&schema, "schema", "", "Database schema to expose (default depends on driver)")
 	cmd.Flags().StringVar(&privateKeyPath, "private-key-path", "", "Path to private key file (for Snowflake key-pair auth)")
 
+	// Individual connection fields: an alternative to --dsn.
+	cmd.Flags().StringVar(&conn.Host, "host", "", "Database host (Snowflake: account identifier); use instead of --dsn")
+	cmd.Flags().IntVar(&conn.Port, "port", 0, "Database port (default depends on driver)")
+	cmd.Flags().StringVar(&conn.User, "user", "", "Database user")
+	cmd.Flags().StringVar(&conn.Password, "password", "", "Database password (prefer --password-prompt to keep it out of shell history)")
+	cmd.Flags().BoolVar(&askPassword, "password-prompt", false, "Prompt for the database password")
+	cmd.Flags().StringVar(&conn.Database, "database", "", "Database name (Oracle: service name; Snowflake: DB or DB/SCHEMA)")
+	cmd.Flags().StringToStringVar(&conn.Params, "param", nil, "Extra connection option as key=value (repeatable), e.g. --param sslmode=disable")
+	cmd.MarkFlagsMutuallyExclusive("dsn", "host")
+	cmd.MarkFlagsMutuallyExclusive("password", "password-prompt")
+
 	return cmd
 }
 
-func runDBAdd(name, driver, dsn, label, schema, privateKeyPath string) error {
+// connFieldFlags are the db add flags that describe the connection as
+// individual fields instead of a DSN.
+var connFieldFlags = []string{"host", "port", "user", "password", "database", "param"}
+
+func runDBAdd(name, driver, dsn, label, schema, privateKeyPath string, fields *model.ConnectionFields) error {
 	// Interactive prompts when flags are missing
 	if name == "" {
 		fmt.Print("Service name: ")
@@ -80,7 +129,7 @@ func runDBAdd(name, driver, dsn, label, schema, privateKeyPath string) error {
 		fmt.Print("Driver (postgres, mysql, mssql, oracle, snowflake, sqlite): ")
 		fmt.Scanln(&driver)
 	}
-	if dsn == "" {
+	if dsn == "" && fields == nil {
 		fmt.Print("DSN (connection string): ")
 		fmt.Scanln(&dsn)
 	}
@@ -88,16 +137,27 @@ func runDBAdd(name, driver, dsn, label, schema, privateKeyPath string) error {
 		label = name
 	}
 
-	// Validate required fields
-	if name == "" || driver == "" || dsn == "" {
-		return fmt.Errorf("name, driver, and dsn are required")
-	}
-
 	supportedDrivers := map[string]bool{
 		"postgres": true, "mysql": true, "mssql": true, "oracle": true, "snowflake": true, "sqlite": true,
 	}
-	if !supportedDrivers[driver] {
+	if driver != "" && !supportedDrivers[driver] {
 		return fmt.Errorf("unsupported driver %q; supported: postgres, mysql, mssql, oracle, snowflake, sqlite", driver)
+	}
+
+	if fields != nil {
+		if dsn != "" {
+			return fmt.Errorf("use either --dsn or connection fields (--host, --port, --user, --password, --database, --param), not both")
+		}
+		built, err := connstr.Build(driver, *fields)
+		if err != nil {
+			return fmt.Errorf("connection fields: %w", err)
+		}
+		dsn = built
+	}
+
+	// Validate required fields
+	if name == "" || driver == "" || dsn == "" {
+		return fmt.Errorf("name, driver, and a connection (--dsn or --host) are required")
 	}
 
 	store, err := openConfigStore()
