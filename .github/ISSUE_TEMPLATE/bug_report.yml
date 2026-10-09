@@ -1,0 +1,84 @@
+name: Bug report
+description: Something in Faucet does not work as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please check the [docs](https://wiki.faucetdb.ai) and existing issues first.
+        Security problems: please follow [SECURITY.md](https://github.com/faucetdb/faucet/blob/main/SECURITY.md) instead of opening an issue.
+  - type: input
+    id: version
+    attributes:
+      label: Faucet version
+      description: Output of `faucet version`
+      placeholder: "0.1.14"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install Faucet?
+      options:
+        - npm / npx
+        - Homebrew
+        - Docker
+        - go install
+        - Release binary
+        - Built from source
+    validations:
+      required: true
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database
+      options:
+        - PostgreSQL
+        - MySQL
+        - MariaDB
+        - SQL Server
+        - Oracle
+        - Snowflake
+        - SQLite
+        - Not database-specific
+    validations:
+      required: true
+  - type: input
+    id: db-version
+    attributes:
+      label: Database version / hosting
+      placeholder: "PostgreSQL 16 on Amazon RDS"
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - REST API
+        - MCP server
+        - Admin UI
+        - CLI
+        - Roles / API keys
+        - OpenAPI spec
+        - Install / packaging
+        - Other
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Commands, requests or clicks. Remove passwords and API keys.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include error messages and relevant log lines.
+    validations:
+      required: true

@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://wiki.faucetdb.ai
+    about: Getting started, the admin UI, MCP setup, RBAC, filters and the API reference.
+  - name: Connect an AI agent (MCP)
+    url: https://wiki.faucetdb.ai/mcp-server
+    about: Configs for Claude Code, Claude Desktop, Cursor, VS Code, Windsurf and ChatGPT.
+  - name: Report a security vulnerability
+    url: https://github.com/faucetdb/faucet/blob/main/SECURITY.md
+    about: Please report security issues privately, not as a public issue.
