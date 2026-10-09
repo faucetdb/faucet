@@ -1,39 +1,46 @@
-interface JsonViewProps {
-  data: unknown;
-  collapsed?: boolean;
-}
+import { JSX } from 'preact';
 
-function syntaxHighlight(json: string): string {
-  return json.replace(
-    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
-    (match) => {
-      let cls = 'text-cyan-accent'; // number
-      if (/^"/.test(match)) {
-        if (/:$/.test(match)) {
-          cls = 'text-brand-light'; // key
-          match = match.replace(/:$/, '');
-          return `<span class="${cls}">${match}</span>:`;
-        } else {
-          cls = 'text-success'; // string
-        }
-      } else if (/true|false/.test(match)) {
-        cls = 'text-warning'; // boolean
-      } else if (/null/.test(match)) {
-        cls = 'text-text-muted'; // null
+/**
+ * Syntax-highlighted JSON. Values come from the user's database, so this
+ * builds elements rather than an HTML string: nothing in the data can be
+ * interpreted as markup.
+ */
+const TOKEN = /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g;
+
+export function JsonView({ data, class: cls = '' }: { data: unknown; class?: string }) {
+  const json = JSON.stringify(data, null, 2) ?? 'undefined';
+  const parts: (string | JSX.Element)[] = [];
+  let last = 0;
+  let i = 0;
+  for (const m of json.matchAll(TOKEN)) {
+    const idx = m.index ?? 0;
+    if (idx > last) parts.push(json.slice(last, idx));
+    const tok = m[0];
+    let color = 'text-[var(--live)]'; // number
+    let text = tok;
+    let suffix = '';
+    if (tok.startsWith('"')) {
+      if (m[2]) {
+        color = 'text-brand-fg'; // key
+        text = tok.slice(0, tok.lastIndexOf('"') + 1);
+        suffix = tok.slice(text.length);
+      } else {
+        color = 'text-ok'; // string
       }
-      return `<span class="${cls}">${match}</span>`;
+    } else if (tok === 'true' || tok === 'false') {
+      color = 'text-warn';
+    } else if (tok === 'null') {
+      color = 'text-fg-faint';
     }
-  );
-}
-
-export function JsonView({ data }: JsonViewProps) {
-  const json = JSON.stringify(data, null, 2);
-  const highlighted = syntaxHighlight(json);
+    parts.push(<span key={i++} class={color}>{text}</span>);
+    if (suffix) parts.push(suffix);
+    last = idx + tok.length;
+  }
+  if (last < json.length) parts.push(json.slice(last));
 
   return (
-    <pre
-      class="font-mono text-sm leading-relaxed overflow-auto p-4 bg-surface rounded-lg border border-border-subtle"
-      dangerouslySetInnerHTML={{ __html: highlighted }}
-    />
+    <pre class={`font-mono text-[12.5px] leading-[20px] text-fg overflow-auto ${cls}`}>
+      <code>{parts}</code>
+    </pre>
   );
 }

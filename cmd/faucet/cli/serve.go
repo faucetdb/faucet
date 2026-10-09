@@ -159,10 +159,10 @@ func runServeDaemon(host string, port int, noUI, dev bool) error {
 	fmt.Printf("  Faucet %s | Database → API in seconds\n", versionString())
 	fmt.Printf("  Listening on http://%s:%d\n", host, port)
 	if !noUI {
-		fmt.Printf("  Admin UI:   http://%s:%d/admin\n", host, port)
+		fmt.Printf("  Admin UI:   http://%s:%d/\n", displayHost(host), port)
 	}
-	fmt.Printf("  OpenAPI:    http://%s:%d/openapi.json\n", host, port)
-	fmt.Printf("  MCP:        http://%s:%d/mcp\n", host, port)
+	fmt.Printf("  OpenAPI:    http://%s:%d/openapi.json\n", displayHost(host), port)
+	fmt.Printf("  MCP:        http://%s:%d/mcp\n", displayHost(host), port)
 	fmt.Println()
 
 	// Check if setup is needed via the API
@@ -174,7 +174,7 @@ func runServeDaemon(host string, port int, noUI, dev bool) error {
 		}
 		if json.NewDecoder(resp.Body).Decode(&setupStatus) == nil && setupStatus.NeedsSetup {
 			fmt.Printf("  First run detected! Set up your admin account:\n")
-			fmt.Printf("    Web UI:  http://%s:%d/setup\n", host, port)
+			fmt.Printf("    Web UI:  http://%s:%d/setup\n", displayHost(host), port)
 			fmt.Printf("    CLI:     faucet admin create --email admin@example.com --password changeme123\n")
 			fmt.Println()
 		}
@@ -360,6 +360,7 @@ func runServe(host string, port int, noUI, dev bool) error {
 		CORSOrigins:     []string{"*"},
 		EnableUI:        !noUI,
 		MaxBodySize:     10 * 1024 * 1024,
+		Version:         versionString(),
 	}
 
 	srv := server.New(srvCfg, registry, store, authSvc, logger)
@@ -367,15 +368,15 @@ func runServe(host string, port int, noUI, dev bool) error {
 	fmt.Printf("→ Faucet %s | Database → API in seconds\n", versionString())
 	fmt.Printf("→ Listening on http://%s:%d\n", host, port)
 	if !noUI {
-		fmt.Printf("→ Admin UI:   http://%s:%d/admin\n", host, port)
+		fmt.Printf("→ Admin UI:   http://%s:%d/\n", displayHost(host), port)
 	}
-	fmt.Printf("→ OpenAPI:    http://%s:%d/openapi.json\n", host, port)
-	fmt.Printf("→ MCP:        http://%s:%d/mcp\n", host, port)
+	fmt.Printf("→ OpenAPI:    http://%s:%d/openapi.json\n", displayHost(host), port)
+	fmt.Printf("→ MCP:        http://%s:%d/mcp\n", displayHost(host), port)
 	fmt.Printf("→ Connected databases: %d\n", len(registry.ListServices()))
 	if !hasAdmin {
 		fmt.Println()
 		fmt.Printf("→ First run detected! Set up your admin account:\n")
-		fmt.Printf("→   Web UI:  http://%s:%d/setup\n", host, port)
+		fmt.Printf("→   Web UI:  http://%s:%d/setup\n", displayHost(host), port)
 		fmt.Printf("→   CLI:     faucet admin create --email admin@example.com --password changeme123\n")
 		fmt.Printf("→   Env:     FAUCET_ADMIN_EMAIL=... FAUCET_ADMIN_PASSWORD=... faucet serve\n")
 	}

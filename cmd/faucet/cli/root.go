@@ -5,6 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	fmcp "github.com/faucetdb/faucet/internal/mcp"
 )
 
 var (
@@ -15,6 +17,7 @@ var (
 // Execute creates the root command tree and runs it.
 func Execute(version, commit, date string) error {
 	appVersion = version
+	fmcp.Version = versionString()
 	rootCmd := newRootCmd(version, commit, date)
 	return rootCmd.Execute()
 }

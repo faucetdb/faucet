@@ -17,6 +17,10 @@ type ServiceConfig struct {
 	IsActive   bool   `json:"is_active" db:"is_active"`
 	SchemaLock string `json:"schema_lock" db:"schema_lock"`
 	Pool      PoolConfig `json:"pool"`
+	// Connection holds individual connection fields (host, port, user, ...).
+	// It is an input-only alternative to DSN: when DSN is empty the server
+	// builds one from these fields. It is never persisted.
+	Connection *ConnectionParams `json:"connection,omitempty" db:"-"`
 	CreatedAt time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
 }
@@ -39,4 +43,28 @@ func DefaultPoolConfig() PoolConfig {
 		ConnMaxIdleTime: 1 * time.Minute,
 		PingInterval:    30 * time.Second,
 	}
+}
+
+// ConnectionParams describes a database connection as individual fields
+// rather than a driver-specific connection string. Which fields apply
+// depends on the driver:
+//
+//	postgres, mysql, mssql, oracle: Host, Port, Database, Username, Password, SSLMode
+//	sqlite:                         Path
+//	snowflake:                      Account, Username, Password, Database, Schema, Warehouse, Role
+//
+// Options carries extra driver-specific query parameters verbatim.
+type ConnectionParams struct {
+	Host      string            `json:"host,omitempty"`
+	Port      int               `json:"port,omitempty"`
+	Database  string            `json:"database,omitempty"`
+	Username  string            `json:"username,omitempty"`
+	Password  string            `json:"password,omitempty"`
+	SSLMode   string            `json:"ssl_mode,omitempty"`
+	Path      string            `json:"path,omitempty"`
+	Account   string            `json:"account,omitempty"`
+	Schema    string            `json:"schema,omitempty"`
+	Warehouse string            `json:"warehouse,omitempty"`
+	Role      string            `json:"role,omitempty"`
+	Options   map[string]string `json:"options,omitempty"`
 }

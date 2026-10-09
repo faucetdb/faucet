@@ -4,6 +4,7 @@ interface ApiOptions {
   method?: string;
   body?: unknown;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
 }
 
 interface ApiState<T> {
@@ -12,68 +13,74 @@ interface ApiState<T> {
   error: string | null;
 }
 
-const BASE_URL = '';
-
-function getAuthHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
-  const apiKey = localStorage.getItem('faucet_api_key');
-  if (apiKey) {
-    headers['X-API-Key'] = apiKey;
+/** Error thrown by apiFetch; carries the HTTP status for callers that care. */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
   }
+}
 
-  const sessionToken = localStorage.getItem('faucet_session');
-  if (sessionToken) {
-    headers['Authorization'] = `Bearer ${sessionToken}`;
-  }
+/** Fired when the server rejects the session so the app can show sign-in. */
+export const SESSION_EXPIRED_EVENT = 'faucet:session-expired';
 
+export function sessionToken(): string | null {
+  return localStorage.getItem('faucet_session');
+}
+
+export function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const session = sessionToken();
+  if (session) headers['Authorization'] = `Bearer ${session}`;
   return headers;
 }
 
-export async function apiFetch<T = any>(
-  path: string,
-  options: ApiOptions = {}
-): Promise<T> {
-  const { method = 'GET', body, headers = {} } = options;
+export async function apiFetch<T = any>(path: string, options: ApiOptions = {}): Promise<T> {
+  const { method = 'GET', body, headers = {}, signal } = options;
 
-  const response = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers: {
-      ...getAuthHeaders(),
-      ...headers,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders(),
+        ...headers,
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal,
+    });
+  } catch (err) {
+    if ((err as Error)?.name === 'AbortError') throw err;
+    throw new ApiError('Faucet is not reachable. Check that the server is running.', 0);
+  }
 
   if (!response.ok) {
-    let errorMsg = `HTTP ${response.status}`;
+    let message = `${response.status} ${response.statusText}`.trim();
     try {
       const errBody = await response.json();
-      if (errBody.error?.message) {
-        errorMsg = errBody.error.message;
-      }
+      if (errBody?.error?.message) message = errBody.error.message;
     } catch {
-      // Use status text fallback
-      errorMsg = `${response.status} ${response.statusText}`;
+      // keep the status text
     }
-    throw new Error(errorMsg);
+    if (response.status === 401 && sessionToken()) {
+      localStorage.removeItem('faucet_session');
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    }
+    throw new ApiError(message, response.status);
   }
 
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
+  if (response.status === 204) return undefined as T;
   return response.json();
 }
 
+export function errorMessage(err: unknown, fallback = 'Something went wrong'): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
 export function useApi<T = any>(path: string, options: ApiOptions = {}) {
-  const [state, setState] = useState<ApiState<T>>({
-    data: null,
-    loading: false,
-    error: null,
-  });
+  const [state, setState] = useState<ApiState<T>>({ data: null, loading: false, error: null });
 
   const execute = useCallback(
     async (overrideOptions?: ApiOptions) => {
@@ -83,38 +90,11 @@ export function useApi<T = any>(path: string, options: ApiOptions = {}) {
         setState({ data, loading: false, error: null });
         return data;
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        setState({ data: null, loading: false, error: message });
+        setState({ data: null, loading: false, error: errorMessage(err) });
         throw err;
       }
     },
     [path]
-  );
-
-  return { ...state, execute };
-}
-
-export function useApiMutation<T = any>() {
-  const [state, setState] = useState<ApiState<T>>({
-    data: null,
-    loading: false,
-    error: null,
-  });
-
-  const execute = useCallback(
-    async (path: string, options: ApiOptions = {}) => {
-      setState({ data: null, loading: true, error: null });
-      try {
-        const data = await apiFetch<T>(path, options);
-        setState({ data, loading: false, error: null });
-        return data;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        setState({ data: null, loading: false, error: message });
-        throw err;
-      }
-    },
-    []
   );
 
   return { ...state, execute };

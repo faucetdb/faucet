@@ -30,16 +30,16 @@
 
 Faucet is a **database-to-REST-API gateway** — a lightweight, self-hosted server that connects to your SQL databases, introspects the schema, and generates a full CRUD REST API with authentication, role-based access control (RBAC), and OpenAPI documentation. It also exposes an **MCP server** so AI agents (Claude, GPT, etc.) can query your data directly.
 
-Think of it as an open-source alternative to [DreamFactory](https://www.dreamfactory.com/), [PostgREST](https://postgrest.org/), or [Hasura](https://hasura.io/) — but with multi-database support, a built-in admin UI, and native AI agent integration, all in a single ~22MB binary.
+Think of it as an open-source alternative to [DreamFactory](https://www.dreamfactory.com/), [PostgREST](https://postgrest.org/), or [Hasura](https://hasura.io/) — but with multi-database support, a built-in admin UI, and native AI agent integration, all in a single binary.
 
-![demo](https://github.com/faucetdb/faucet/blob/main/screenshots/faucet-demo.gif)
+<p align="center"><img src="screenshots/admin-databases.webp" alt="Faucet admin UI listing connected PostgreSQL and SQLite databases" width="800"></p>
 
 ### Use Cases
 
 - **Instant backend for apps** — Skip writing CRUD APIs by hand. Point Faucet at your database and start building your frontend.
 - **AI agent data access** — Give Claude, GPT, or any MCP-compatible agent governed, read/write access to your databases.
 - **Internal tools & dashboards** — Generate APIs for internal databases without modifying existing infrastructure.
-- **Legacy database modernization** — Put a REST API in front of SQL Server 2008, MySQL 5.7, or PostgreSQL 9.6 without code changes.
+- **Legacy database modernization** — Put a REST API in front of SQL Server 2012, MySQL 5.7, or PostgreSQL 9.6 without code changes.
 - **Multi-database aggregation** — Connect PostgreSQL, MySQL, SQL Server, Oracle, and more to a single Faucet instance and query them all through one API.
 - **Rapid prototyping** — Go from empty database to working API in under 60 seconds.
 
@@ -59,7 +59,7 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 └──────────────┘       │                                       │       │  (AI Agents) │
                        │  ┌──────────────────────────────────┐ │       ├──────────────┤
                        │  │   Embedded Admin UI (Preact)     │ │──────▶│   Admin UI   │
-                       │  └──────────────────────────────────┘ │       │  :8080/admin │
+                       │  └──────────────────────────────────┘ │       │  :8080/      │
                        └───────────────────────────────────────┘       └──────────────┘
 ```
 
@@ -70,19 +70,26 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 ## Screenshots
 
 <p align="center">
-  <img src="screenshots/faucet-services-all-connected.png" alt="Faucet Services — Multiple database connections" width="800">
-  <br><em>Manage multiple database connections — PostgreSQL, MySQL, SQL Server, and more</em>
+  <img src="screenshots/admin-add-database.webp" alt="Adding a PostgreSQL database in the Faucet admin UI with host, port, user and password fields" width="800">
+  <br><em>Connect a database with host, port, user and password. Faucet tests it before saving and tells you what to fix.</em>
 </p>
 
 <p align="center">
-  <img src="screenshots/faucet-schema-explorer-working.png" alt="Faucet Schema Explorer — Browse tables, columns, and types" width="800">
-  <br><em>Schema Explorer — Browse tables, columns, types, and constraints across all connected databases</em>
+  <img src="screenshots/admin-schema.webp" alt="Faucet schema page showing columns, keys and schema drift on a locked table" width="800">
+  <br><em>Browse tables, columns, keys and data, and lock your API contract against breaking schema changes.</em>
 </p>
 
 <p align="center">
-  <img src="screenshots/faucet-api-explorer-working.png" alt="Faucet API Explorer — Test REST endpoints interactively" width="800">
-  <br><em>API Explorer — Test REST endpoints interactively with live response data</em>
+  <img src="screenshots/admin-api-explorer.webp" alt="Faucet API explorer with a filtered query, JSON response and copy-as-curl" width="800">
+  <br><em>Build requests with filters and pagination, then copy them as curl, JavaScript or Python.</em>
 </p>
+
+<p align="center">
+  <img src="screenshots/admin-ai-agents.webp" alt="Faucet AI agents page with ready-made MCP configs for Claude Code, Cursor, VS Code and more" width="800">
+  <br><em>Copy-ready MCP setup for Claude Code, Claude Desktop, Cursor, VS Code, Windsurf and ChatGPT.</em>
+</p>
+
+See the [Admin UI guide](https://wiki.faucetdb.ai/admin-ui) for a tour of every page.
 
 ---
 
@@ -110,8 +117,8 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 - **Governed AI queries** — AI agents respect the same RBAC rules as API clients
 
 ### Developer Experience
-- **Single binary** — Zero external dependencies, ~22MB, cross-platform (Linux, macOS, Windows)
-- **Embedded admin UI** — Preact + Tailwind dashboard with setup wizard, schema explorer, API tester
+- **Single binary** — Zero external dependencies, cross-platform (Linux, macOS, Windows)
+- **Embedded admin UI** — connect databases with host, port, user and password (no connection strings), test before saving, browse schemas and data, build roles and keys, and copy ready-made MCP configs for Claude, Cursor, VS Code and more. Works offline; light and dark themes
 - **SQLite config store** — All configuration stored locally, no external database required
 - **npm + Homebrew + Docker** — Install in seconds on any platform (`npx @faucetdb/faucet`)
 - **Health endpoints** — `/healthz` and `/readyz` for Kubernetes-style probes
@@ -125,7 +132,7 @@ Think of it as an open-source alternative to [DreamFactory](https://www.dreamfac
 | **PostgreSQL** | 9.6 – 17 | Amazon RDS, Aurora, Supabase, Neon, Azure Database |
 | **MySQL** | 5.7 – 9.x | Amazon RDS, Aurora MySQL, PlanetScale, Azure MySQL |
 | **MariaDB** | 10.2 – 11.x | Via MySQL driver |
-| **SQL Server** | 2008 – 2022 | Azure SQL Database, Amazon RDS |
+| **SQL Server** | 2012 – 2022 | Azure SQL Database, Amazon RDS |
 | **Oracle** | 12c – 26ai | Oracle Cloud (OCI), Amazon RDS, Azure |
 | **Snowflake** | Current | AWS, Azure, GCP |
 | **SQLite** | 3.35+ | Local file, in-memory |
@@ -161,24 +168,29 @@ go install github.com/faucetdb/faucet/cmd/faucet@latest
 ### Run
 
 ```bash
-# Start the server
 faucet serve
+```
 
-# Create an admin account
+Open **http://localhost:8080**. The setup wizard creates your admin account and connects your first database: pick the engine, enter host, port, username and password, click **Test connection**, and save. Every table gets REST endpoints at `/api/v1/<name>/_table/<table>` and MCP tools right away. Then create a role on the **Roles** page and an API key on the **API keys** page, which hands you a ready-to-run `curl` command and an MCP setup command that already contain the new key.
+
+Prefer the terminal? The same steps with the CLI:
+
+```bash
+# Create an admin account and add a database (no connection string needed)
 faucet admin create --email admin@example.com --password changeme123
+faucet db add --name mydb --driver postgres \
+  --host localhost --user app --password 's3cret@!' --database mydb
 
-# Add a database
-faucet db add mydb --driver postgres --dsn "postgres://user:pass@localhost/mydb?sslmode=disable"
-
-# Create a role that can read every service, then an API key bound to it
+# Create a role that can read every database, then an API key bound to it
 faucet role create --name default --verbs GET
 faucet key create --role default
 
-# Query your data
-curl -H "X-API-Key: faucet_YOUR_KEY_HERE" http://localhost:8080/api/v1/mydb/_table/users?limit=10
+# Start the server (it loads databases on startup), then query your data
+faucet serve
+curl -H "X-API-Key: faucet_YOUR_KEY_HERE" "http://localhost:8080/api/v1/mydb/_table/users?limit=10"
 ```
 
-Open **http://localhost:8080** for the admin dashboard.
+`--dsn` still works if you already have a connection string. A running server picks up databases added through the admin UI or API immediately; databases added with `faucet db add` are loaded the next time the server starts.
 
 ---
 

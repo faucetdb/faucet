@@ -1,137 +1,236 @@
 @import "tailwindcss";
 
-@theme {
-  --color-brand: #0066FF;
-  --color-brand-light: #3385FF;
-  --color-brand-dark: #0052CC;
-  --color-cyan-accent: #00D4FF;
-  --color-surface: #0a0a0f;
-  --color-surface-raised: #111118;
-  --color-surface-overlay: #1a1a24;
-  --color-border-subtle: #1e1e2e;
-  --color-border-default: #2a2a3a;
-  --color-text-primary: #f0f0f5;
-  --color-text-secondary: #8888a0;
-  --color-text-muted: #555570;
-  --color-success: #00c853;
-  --color-warning: #ffab00;
-  --color-error: #ff1744;
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
+/* Fonts are bundled (latin + latin-ext only) so the UI works offline. */
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2') format('woff2-variations');
 }
 
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-  src: url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* ---- Theme tokens ----------------------------------------------------- */
+/* Dark ("deep water") is the default; light follows the system or the
+   user's explicit choice via [data-theme]. */
+:root {
+  color-scheme: dark;
+  --bg: #090c14;
+  --panel: #0f1320;
+  --panel-2: #161b2c;
+  --line: #20273f;
+  --line-strong: #2e3654;
+  --fg: #e7eaf3;
+  --fg-muted: #9aa2bf;
+  --fg-faint: #6a7291;
+  --brand: #3b7bff;
+  --brand-hover: #5a90ff;
+  --brand-fg: #93b5ff;
+  --live: #22d3ee;
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  --overlay: rgb(3 5 10 / 0.66);
+  --shadow-float: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px var(--line);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f4f6fb;
+    --panel: #ffffff;
+    --panel-2: #eef1f7;
+    --line: #e0e5ef;
+    --line-strong: #c8d0df;
+    --fg: #0d1322;
+    --fg-muted: #4d5674;
+    --fg-faint: #7c849e;
+    --brand: #1d5bf0;
+    --brand-hover: #1749c4;
+    --brand-fg: #1a4fd4;
+    --live: #0891b2;
+    --ok: #059669;
+    --warn: #b45309;
+    --bad: #dc2626;
+    --overlay: rgb(13 19 34 / 0.38);
+    --shadow-float: 0 18px 48px -16px rgb(13 19 34 / 0.28), 0 0 0 1px var(--line);
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f6fb;
+  --panel: #ffffff;
+  --panel-2: #eef1f7;
+  --line: #e0e5ef;
+  --line-strong: #c8d0df;
+  --fg: #0d1322;
+  --fg-muted: #4d5674;
+  --fg-faint: #7c849e;
+  --brand: #1d5bf0;
+  --brand-hover: #1749c4;
+  --brand-fg: #1a4fd4;
+  --live: #0891b2;
+  --ok: #059669;
+  --warn: #b45309;
+  --bad: #dc2626;
+  --overlay: rgb(13 19 34 / 0.38);
+  --shadow-float: 0 18px 48px -16px rgb(13 19 34 / 0.28), 0 0 0 1px var(--line);
+}
+
+@theme {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-faint: var(--fg-faint);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-fg: var(--brand-fg);
+  --color-live: var(--live);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+  --text-base: 14px;
+  --text-base--line-height: 22px;
+  --text-lg: 16px;
+  --text-lg--line-height: 24px;
+  --text-xl: 20px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 26px;
+  --text-2xl--line-height: 32px;
+
+  --radius-control: 6px;
+  --radius-panel: 10px;
+  --radius-float: 14px;
 }
 
 @layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 22px;
+  }
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--color-border-default) transparent;
+    scrollbar-color: var(--line-strong) transparent;
   }
-
-  *::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  *::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  *::-webkit-scrollbar-thumb {
-    background: var(--color-border-default);
-    border-radius: 3px;
-  }
-
-  *::-webkit-scrollbar-thumb:hover {
-    background: var(--color-text-muted);
-  }
-
   ::selection {
-    background-color: color-mix(in srgb, var(--color-brand) 40%, transparent);
+    background-color: color-mix(in srgb, var(--brand) 35%, transparent);
   }
-
-  input, textarea, select {
-    color-scheme: dark;
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+  code, kbd, pre, samp {
+    font-family: var(--font-mono);
+    font-feature-settings: normal;
   }
 }
 
 @layer components {
-  .btn-primary {
-    @apply bg-brand text-white font-medium px-4 py-2 rounded-lg
-      hover:bg-brand-light active:bg-brand-dark
-      transition-colors duration-150
-      focus:outline-none focus:ring-2 focus:ring-brand/50 focus:ring-offset-2 focus:ring-offset-surface;
+  /* Inline links inside prose */
+  .link {
+    color: var(--brand-fg);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--brand-fg) 35%, transparent);
+    text-underline-offset: 3px;
+  }
+  .link:hover {
+    text-decoration-color: currentColor;
   }
 
-  .btn-secondary {
-    @apply bg-surface-overlay text-text-primary font-medium px-4 py-2 rounded-lg
-      border border-border-default
-      hover:bg-border-subtle hover:border-border-default
-      active:bg-surface-raised
-      transition-colors duration-150
-      focus:outline-none focus:ring-2 focus:ring-brand/50 focus:ring-offset-2 focus:ring-offset-surface;
+  /* Inline code chip inside prose */
+  .code-chip {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--fg);
+    white-space: nowrap;
   }
 
-  .btn-danger {
-    @apply bg-error/10 text-error font-medium px-4 py-2 rounded-lg
-      border border-error/20
-      hover:bg-error/20 hover:border-error/30
-      transition-colors duration-150
-      focus:outline-none focus:ring-2 focus:ring-error/50 focus:ring-offset-2 focus:ring-offset-surface;
-  }
-
-  .btn-ghost {
-    @apply text-text-secondary font-medium px-4 py-2 rounded-lg
-      hover:bg-surface-overlay hover:text-text-primary
-      transition-colors duration-150
-      focus:outline-none focus:ring-2 focus:ring-brand/50;
-  }
-
-  .input {
-    @apply bg-surface-raised border border-border-default rounded-lg px-3 py-2
-      text-text-primary placeholder-text-muted
-      focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-brand
-      transition-colors duration-150;
-  }
-
-  .card {
-    @apply bg-surface-raised border border-border-subtle rounded-xl p-6;
-  }
-
-  .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  .kbd {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 0 5px;
+    border-radius: 4px;
+    border: 1px solid var(--line-strong);
+    border-bottom-width: 2px;
+    color: var(--fg-muted);
   }
 }
 
+/* ---- Motion ----------------------------------------------------------- */
+@keyframes drawer-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes pop-in {
+  from { transform: translateY(6px) scale(0.98); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes flow {
+  to { stroke-dashoffset: -24; }
+}
+@keyframes row-flash {
+  from { background-color: color-mix(in srgb, var(--live) 14%, transparent); }
+  to { background-color: transparent; }
 }
 
-@keyframes slide-in {
-  from { opacity: 0; transform: translateX(-8px); }
-  to { opacity: 1; transform: translateX(0); }
+.anim-drawer { animation: drawer-in 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.anim-pop { animation: pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1); }
+.anim-fade { animation: fade-in 160ms ease-out; }
+.anim-flash { animation: row-flash 2.4s ease-out; }
+.flow-on { animation: flow 0.9s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-drawer, .anim-pop, .anim-fade, .anim-flash, .flow-on { animation: none !important; }
+  * { transition-duration: 0ms !important; }
 }
 
-@keyframes scale-in {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-.animate-fade-in {
-  animation: fade-in 0.2s ease-out;
-}
-
-.animate-slide-in {
-  animation: slide-in 0.2s ease-out;
-}
-
-.animate-scale-in {
-  animation: scale-in 0.15s ease-out;
-}
+/* Show code exactly as typed: no ">=" to "≥" ligatures in filters and SQL. */
+code, pre, kbd, .font-mono { font-variant-ligatures: none; }

@@ -1,343 +1,268 @@
-import { useState, useEffect } from 'preact/hooks';
-import { Modal } from '../components/Modal';
-import { StatusBadge } from '../components/StatusBadge';
-import { apiFetch } from '../hooks/useApi';
-
-interface Service {
-  name: string;
-  driver: string;
-  dsn: string;
-  schema: string;
-  is_active: boolean;
-  created_at: string;
-}
-
-const DB_DRIVERS = [
-  { value: 'postgres', label: 'PostgreSQL' },
-  { value: 'mysql', label: 'MySQL' },
-  { value: 'mssql', label: 'SQL Server' },
-  { value: 'snowflake', label: 'Snowflake' },
-];
-
-const emptyForm = {
-  name: '',
-  driver: 'postgres',
-  dsn: '',
-  schema: '',
-};
+import { useEffect, useState } from 'preact/hooks';
+import { DatabaseDrawer } from '../components/DatabaseDrawer';
+import { EnginePicker, ServiceRecord } from '../components/ConnectionForm';
+import { DbLogo } from '../components/DbLogo';
+import { Icon } from '../components/Icon';
+import { confirm, toast } from '../components/Overlay';
+import { Button, ButtonLink, CopyButton, EmptyState, PageHeader, Panel, Skeleton, StatusDot, Tag } from '../components/ui';
+import { apiFetch, errorMessage } from '../hooks/useApi';
+import { EngineId, describeConnection, engineForDriver } from '../lib/drivers';
+import { serverOrigin } from '../lib/format';
+import { useHealth } from '../lib/server';
 
 export function Services() {
-  const [services, setServices] = useState<Service[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ ...emptyForm });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [services, setServices] = useState<ServiceRecord[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [drawer, setDrawer] = useState<{ open: boolean; editing?: ServiceRecord | null; engine?: EngineId }>({ open: false });
   const [testing, setTesting] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string }>>({});
+  const [rowResult, setRowResult] = useState<Record<string, { ok: boolean; message: string }>>({});
+  const [flash, setFlash] = useState<string | null>(null);
+  const { checks, refresh: refreshHealth } = useHealth(15_000);
 
   useEffect(() => {
-    loadServices();
+    load();
+    // Deep link from the overview: /services?add=1 opens the drawer.
+    if (new URLSearchParams(window.location.search).get('add')) {
+      setDrawer({ open: true });
+      window.history.replaceState(null, '', '/services');
+    }
   }, []);
 
-  async function loadServices() {
-    setLoading(true);
+  async function load() {
     try {
       const res = await apiFetch('/api/v1/system/service');
       setServices(res.resource || []);
-    } catch {
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(errorMessage(err));
       setServices([]);
-    } finally {
-      setLoading(false);
     }
   }
 
-  function openNew() {
-    setForm({ ...emptyForm });
-    setError(null);
-    setShowModal(true);
-  }
-
-  async function handleTestConnection(serviceName: string) {
-    setTesting(serviceName);
+  async function test(name: string) {
+    setTesting(name);
     try {
-      await apiFetch(`/api/v1/system/service/${serviceName}/test`);
-      setTestResults({ ...testResults, [serviceName]: { ok: true, message: 'Connection successful' } });
+      await apiFetch(`/api/v1/system/service/${encodeURIComponent(name)}/test`);
+      setRowResult((r) => ({ ...r, [name]: { ok: true, message: 'Connection works' } }));
+      refreshHealth();
     } catch (err) {
-      setTestResults({
-        ...testResults,
-        [serviceName]: {
-          ok: false,
-          message: err instanceof Error ? err.message : 'Connection failed',
-        },
-      });
+      setRowResult((r) => ({ ...r, [name]: { ok: false, message: errorMessage(err, 'Connection failed') } }));
     } finally {
       setTesting(null);
     }
   }
 
-  async function handleSave() {
-    setSaving(true);
-    setError(null);
+  async function remove(svc: ServiceRecord) {
+    const ok = await confirm({
+      title: `Remove ${svc.name}?`,
+      body: (
+        <>
+          Its API at <span class="font-mono text-fg">/api/v1/{svc.name}</span> and its MCP tools stop working right away. The database itself is not touched.
+        </>
+      ),
+      confirmLabel: 'Remove database',
+      danger: true,
+    });
+    if (!ok) return;
     try {
-      const body: Record<string, any> = {
-        name: form.name,
-        driver: form.driver,
-        dsn: form.dsn,
-      };
-      if (form.schema) {
-        body.schema = form.schema;
-      }
-
-      const result = await apiFetch('/api/v1/system/service', { method: 'POST', body });
-      setShowModal(false);
-      await loadServices();
-
-      // If the backend returned a connection warning, show it on the service card.
-      if (result?.connection_warning) {
-        setTestResults({
-          ...testResults,
-          [form.name]: { ok: false, message: result.connection_warning },
-        });
-      }
+      await apiFetch(`/api/v1/system/service/${encodeURIComponent(svc.name)}`, { method: 'DELETE' });
+      toast(`Removed ${svc.name}`);
+      load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save service');
-    } finally {
-      setSaving(false);
+      toast(errorMessage(err, 'Could not remove the database'), 'bad');
     }
   }
 
-  async function handleDelete(name: string) {
-    if (!confirm(`Delete service "${name}"? This cannot be undone.`)) return;
+  async function setActive(svc: ServiceRecord, active: boolean) {
     try {
-      await apiFetch(`/api/v1/system/service/${name}`, { method: 'DELETE' });
-      loadServices();
-    } catch {
-      // ignore
+      await apiFetch(`/api/v1/system/service/${encodeURIComponent(svc.name)}`, {
+        method: 'PUT',
+        body: { is_active: active, read_only: svc.read_only, raw_sql_allowed: svc.raw_sql_allowed },
+      });
+      toast(active ? `Resumed ${svc.name}` : `Paused ${svc.name}`);
+      load();
+      refreshHealth();
+    } catch (err) {
+      toast(errorMessage(err), 'bad');
     }
   }
 
-  function dsnPlaceholder(driver: string): string {
-    switch (driver) {
-      case 'postgres':
-        return 'postgres://user:pass@localhost:5432/dbname?sslmode=disable';
-      case 'mysql':
-        return 'user:pass@tcp(host:3306)/dbname';
-      case 'mssql':
-        return 'sqlserver://user:pass@localhost:1433?database=dbname';
-      case 'snowflake':
-        return 'user:pass@account/dbname/schema?warehouse=wh';
-      default:
-        return '';
-    }
+  function onSaved(svc: ServiceRecord, warning?: string) {
+    const wasEditing = !!drawer.editing;
+    setDrawer({ open: false });
+    setFlash(svc.name);
+    setRowResult((r) => {
+      const { [svc.name]: _, ...rest } = r;
+      return warning ? { ...rest, [svc.name]: { ok: false, message: warning } } : rest;
+    });
+    if (warning) toast(`Saved ${svc.name}, but it is not connected yet`, 'bad');
+    else toast(wasEditing ? `Saved changes to ${svc.name}` : `Added ${svc.name}. Its API is live at /api/v1/${svc.name}`);
+    load();
+    refreshHealth();
   }
 
-  function dsnHelpText(driver: string): string {
-    switch (driver) {
-      case 'mysql':
-        return 'Format: user:pass@tcp(host:port)/dbname — the tcp() wrapper is required';
-      case 'postgres':
-        return 'Format: postgres://user:pass@host:port/dbname?sslmode=disable';
-      case 'mssql':
-        return 'Format: sqlserver://user:pass@host:port?database=dbname';
-      default:
-        return 'Full connection string for the database';
-    }
+  function status(svc: ServiceRecord) {
+    if (!svc.is_active) return <StatusDot status="idle" label="Paused" />;
+    const check = checks[svc.name];
+    if (check === 'ok') return <StatusDot status="ok" label="Connected" />;
+    if (check) return <StatusDot status="bad" label="Unreachable" />;
+    return <StatusDot status="warn" label="Not connected" />;
   }
+
+  const addButton = (
+    <Button variant="primary" icon="plus" onClick={() => setDrawer({ open: true })}>
+      Add database
+    </Button>
+  );
 
   return (
-    <div class="space-y-6">
-      {/* Page header */}
-      <div class="flex items-center justify-between">
-        <div>
-          <h1 class="text-2xl font-semibold text-text-primary">Services</h1>
-          <p class="text-sm text-text-secondary mt-1">Manage database connections</p>
-        </div>
-        <button onClick={openNew} class="btn-primary flex items-center gap-2">
-          <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
-          </svg>
-          Add Service
-        </button>
-      </div>
+    <div>
+      <PageHeader
+        title="Databases"
+        description="Each database you connect gets a REST API and MCP tools for AI agents."
+        actions={services && services.length > 0 ? addButton : undefined}
+      />
 
-      {/* Service cards */}
-      {loading ? (
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} class="card animate-pulse">
-              <div class="h-4 bg-surface-overlay rounded w-1/2 mb-4" />
-              <div class="h-3 bg-surface-overlay rounded w-3/4 mb-2" />
-              <div class="h-3 bg-surface-overlay rounded w-1/3" />
+      {loadError && <p class="mb-4 text-sm text-bad">Could not load databases: {loadError}</p>}
+
+      {services === null ? (
+        <Panel bodyClass="divide-y divide-line">
+          {[0, 1].map((i) => (
+            <div key={i} class="flex items-center gap-4 px-5 py-4">
+              <Skeleton class="w-9 h-9 rounded-[8px]" />
+              <div class="flex-1 flex flex-col gap-2">
+                <Skeleton class="h-4 w-40" />
+                <Skeleton class="h-3 w-64" />
+              </div>
             </div>
           ))}
-        </div>
+        </Panel>
       ) : services.length === 0 ? (
-        <div class="card text-center py-16">
-          <div class="text-text-muted mb-4">
-            <svg class="w-12 h-12 mx-auto" viewBox="0 0 20 20" fill="currentColor" opacity="0.3">
-              <path d="M3 12v3c0 1.657 3.134 3 7 3s7-1.343 7-3v-3c0 1.657-3.134 3-7 3s-7-1.343-7-3z" />
-              <path d="M3 7v3c0 1.657 3.134 3 7 3s7-1.343 7-3V7c0 1.657-3.134 3-7 3S3 8.657 3 7z" />
-              <path d="M17 5c0 1.657-3.134 3-7 3S3 6.657 3 5s3.134-3 7-3 7 1.343 7 3z" />
-            </svg>
+        <Panel>
+          <EmptyState icon="database" title="Connect your first database">
+            Pick what you're running. You'll enter the host, port, user and password, and Faucet does the rest.
+          </EmptyState>
+          <div class="px-6 pb-8 sm:px-10 -mt-2">
+            <EnginePicker value={'' as EngineId} onChange={(engine) => setDrawer({ open: true, engine })} />
           </div>
-          <h3 class="text-lg font-medium text-text-primary mb-2">No services connected</h3>
-          <p class="text-sm text-text-secondary mb-6">Add a database connection to start generating REST APIs.</p>
-          <button onClick={openNew} class="btn-primary">Add Your First Service</button>
-        </div>
+        </Panel>
       ) : (
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {services.map((svc) => (
-            <div key={svc.name} class="card group hover:border-border-default transition-colors">
-              <div class="flex items-start justify-between mb-3">
-                <div class="flex items-center gap-3">
-                  <div class="w-10 h-10 rounded-lg bg-brand/10 flex items-center justify-center shrink-0">
-                    <span class="text-sm font-bold text-brand uppercase">{svc.driver.slice(0, 2)}</span>
+        <Panel bodyClass="divide-y divide-line">
+          {services.map((svc) => {
+            const engine = engineForDriver(svc.driver);
+            const where = describeConnection(svc.driver, svc.connection);
+            const endpoint = `${serverOrigin()}/api/v1/${svc.name}`;
+            const result = rowResult[svc.name];
+            return (
+              <div key={svc.name} class={`px-5 py-4 ${flash === svc.name ? 'anim-flash' : ''}`}>
+                <div class="flex flex-wrap items-start gap-x-4 gap-y-3">
+                  <DbLogo driver={svc.driver} size={36} />
+                  <div class="min-w-0 flex-1 basis-60">
+                    <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                      <h2 class="text-base font-semibold text-fg font-mono">{svc.name}</h2>
+                      {status(svc)}
+                      {svc.read_only && <Tag>Read-only</Tag>}
+                      {svc.raw_sql_allowed && <Tag tone="warn">Raw SQL on</Tag>}
+                    </div>
+                    <p class="text-sm text-fg-muted mt-0.5 truncate">
+                      {engine.label}
+                      {where && <> on <span class="font-mono">{where}</span></>}
+                    </p>
+                    <div class="flex items-center gap-1 mt-2 -ml-0.5">
+                      <code class="text-[12.5px] text-fg-muted truncate">{endpoint}</code>
+                      <CopyButton text={endpoint} label="Copy URL" />
+                    </div>
                   </div>
-                  <div>
-                    <h3 class="text-sm font-semibold text-text-primary">{svc.name}</h3>
-                    <p class="text-xs text-text-muted">{svc.driver}</p>
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <ButtonLink size="sm" variant="secondary" icon="table" href={`/schema?service=${encodeURIComponent(svc.name)}`}>Browse</ButtonLink>
+                    <ButtonLink size="sm" variant="secondary" icon="terminal" href={`/api-explorer?service=${encodeURIComponent(svc.name)}`}>Try API</ButtonLink>
+                    <Button size="sm" variant="ghost" icon="bolt" loading={testing === svc.name} onClick={() => test(svc.name)}>Test</Button>
+                    <Button size="sm" variant="ghost" icon="pencil" onClick={() => setDrawer({ open: true, editing: svc })}>Edit</Button>
+                    <RowMenu
+                      items={[
+                        svc.is_active
+                          ? { label: 'Pause API', onClick: () => setActive(svc, false) }
+                          : { label: 'Resume API', onClick: () => setActive(svc, true) },
+                        { label: 'Remove', danger: true, onClick: () => remove(svc) },
+                      ]}
+                    />
                   </div>
                 </div>
-                <StatusBadge status={svc.is_active ? 'active' : 'inactive'} />
+                {result && (
+                  <p class={`mt-3 ml-[52px] text-sm ${result.ok ? 'text-ok' : 'text-bad'} break-words`} role="status">
+                    <Icon name={result.ok ? 'check' : 'alert'} size={14} class="inline -mt-0.5 mr-1.5" />
+                    {result.message}
+                  </p>
+                )}
               </div>
+            );
+          })}
+        </Panel>
+      )}
 
-              {svc.schema && (
-                <div class="text-xs font-mono text-text-secondary mb-3">
-                  <span class="text-text-muted">schema:</span> {svc.schema}
-                </div>
-              )}
+      <DatabaseDrawer
+        open={drawer.open}
+        editing={drawer.editing}
+        initialEngine={drawer.engine}
+        onClose={() => setDrawer({ open: false })}
+        onSaved={onSaved}
+      />
+    </div>
+  );
+}
 
-              {/* Test result */}
-              {testResults[svc.name] && (
-                <div
-                  class={`text-xs p-2 rounded mb-3 ${
-                    testResults[svc.name].ok
-                      ? 'bg-success/10 text-success'
-                      : 'bg-error/10 text-error'
-                  }`}
-                >
-                  {testResults[svc.name].message}
-                </div>
-              )}
-
-              <div class="flex items-center gap-2 pt-3 border-t border-border-subtle">
-                <button
-                  onClick={() => handleTestConnection(svc.name)}
-                  disabled={testing === svc.name}
-                  class="btn-ghost text-xs py-1.5 px-3"
-                >
-                  {testing === svc.name ? 'Testing...' : 'Test'}
-                </button>
-                <a
-                  href={`/schema?service=${svc.name}`}
-                  class="btn-ghost text-xs py-1.5 px-3"
-                >
-                  Schema
-                </a>
-                <button
-                  onClick={() => handleDelete(svc.name)}
-                  class="btn-ghost text-xs py-1.5 px-3 text-error hover:text-error ml-auto"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
+/** Small overflow menu for less common row actions. */
+function RowMenu({ items }: { items: { label: string; onClick: () => void; danger?: boolean }[] }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+  return (
+    <div class="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="More actions"
+        title="More actions"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(!open);
+        }}
+        class="inline-flex items-center justify-center w-7 h-7 rounded-[6px] text-fg-muted hover:text-fg hover:bg-panel-2"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="5" cy="12" r="1.6" />
+          <circle cx="12" cy="12" r="1.6" />
+          <circle cx="19" cy="12" r="1.6" />
+        </svg>
+      </button>
+      {open && (
+        <div role="menu" class="absolute right-0 top-8 z-20 min-w-[160px] py-1 rounded-[8px] bg-panel shadow-[var(--shadow-float)] anim-pop">
+          {items.map((it) => (
+            <button
+              key={it.label}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                it.onClick();
+              }}
+              class={`w-full text-left px-3 h-8 text-sm hover:bg-panel-2 ${it.danger ? 'text-bad' : 'text-fg'}`}
+            >
+              {it.label}
+            </button>
           ))}
         </div>
       )}
-
-      {/* Add Modal */}
-      <Modal
-        isOpen={showModal}
-        onClose={() => setShowModal(false)}
-        title="Add Service"
-        width="max-w-xl"
-      >
-        <div class="space-y-4">
-          {error && (
-            <div class="p-3 rounded-lg bg-error/10 border border-error/20 text-sm text-error">
-              {error}
-            </div>
-          )}
-
-          <div>
-            <label class="block text-sm font-medium text-text-secondary mb-1.5">Service Name</label>
-            <input
-              type="text"
-              class="input w-full"
-              placeholder="my-database"
-              value={form.name}
-              onInput={(e) => setForm({ ...form, name: (e.target as HTMLInputElement).value })}
-            />
-            <p class="text-xs text-text-muted mt-1">Unique identifier used in API URLs (e.g. /api/v1/my-database/_table/...)</p>
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-text-secondary mb-1.5">Database Driver</label>
-            <div class="grid grid-cols-2 gap-2">
-              {DB_DRIVERS.map((d) => (
-                <button
-                  key={d.value}
-                  onClick={() => setForm({ ...form, driver: d.value })}
-                  class={`
-                    p-3 rounded-lg border text-left text-sm font-medium transition-colors
-                    ${form.driver === d.value
-                      ? 'border-brand bg-brand/10 text-brand'
-                      : 'border-border-default bg-surface hover:bg-surface-overlay text-text-secondary'
-                    }
-                  `}
-                >
-                  {d.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-text-secondary mb-1.5">DSN (Connection String)</label>
-            <input
-              type="text"
-              class="input w-full font-mono text-sm"
-              placeholder={dsnPlaceholder(form.driver)}
-              value={form.dsn}
-              onInput={(e) => setForm({ ...form, dsn: (e.target as HTMLInputElement).value })}
-            />
-            <p class="text-xs text-text-muted mt-1">{dsnHelpText(form.driver)}</p>
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-text-secondary mb-1.5">
-              Schema <span class="text-text-muted font-normal">(optional)</span>
-            </label>
-            <input
-              type="text"
-              class="input w-full font-mono text-sm"
-              placeholder="public"
-              value={form.schema}
-              onInput={(e) => setForm({ ...form, schema: (e.target as HTMLInputElement).value })}
-            />
-            <p class="text-xs text-text-muted mt-1">Database schema to use (defaults to driver default)</p>
-          </div>
-
-          {/* Actions */}
-          <div class="flex items-center justify-end gap-2 pt-4 border-t border-border-subtle">
-            <button
-              onClick={() => setShowModal(false)}
-              class="btn-ghost text-sm"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving || !form.name || !form.dsn}
-              class="btn-primary text-sm"
-            >
-              {saving ? 'Saving...' : 'Add Service'}
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }

@@ -1,151 +1,144 @@
-import { JSX } from 'preact';
+import { useState } from 'preact/hooks';
+import { Icon, IconName } from './Icon';
+import { DOCS_URL, GITHUB_URL, useHealth, useServerInfo } from '../lib/server';
+import { ThemeChoice, getTheme, setTheme } from '../lib/theme';
 
 interface NavItem {
   path: string;
   label: string;
-  icon: (props: { class?: string }) => JSX.Element;
+  icon: IconName;
 }
 
-const navItems: NavItem[] = [
+const NAV: { heading?: string; items: NavItem[] }[] = [
+  { items: [{ path: '/', label: 'Overview', icon: 'home' }] },
   {
-    path: '/',
-    label: 'Dashboard',
-    icon: (p) => (
-      <svg class={p.class} viewBox="0 0 20 20" fill="currentColor">
-        <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
-      </svg>
-    ),
+    heading: 'Data',
+    items: [
+      { path: '/services', label: 'Databases', icon: 'database' },
+      { path: '/schema', label: 'Schema', icon: 'table' },
+      { path: '/api-explorer', label: 'API explorer', icon: 'terminal' },
+    ],
   },
   {
-    path: '/services',
-    label: 'Services',
-    icon: (p) => (
-      <svg class={p.class} viewBox="0 0 20 20" fill="currentColor">
-        <path d="M3 12v3c0 1.657 3.134 3 7 3s7-1.343 7-3v-3c0 1.657-3.134 3-7 3s-7-1.343-7-3z" />
-        <path d="M3 7v3c0 1.657 3.134 3 7 3s7-1.343 7-3V7c0 1.657-3.134 3-7 3S3 8.657 3 7z" />
-        <path d="M17 5c0 1.657-3.134 3-7 3S3 6.657 3 5s3.134-3 7-3 7 1.343 7 3z" />
-      </svg>
-    ),
+    heading: 'Access',
+    items: [
+      { path: '/roles', label: 'Roles', icon: 'shield' },
+      { path: '/api-keys', label: 'API keys', icon: 'key' },
+    ],
   },
   {
-    path: '/schema',
-    label: 'Schema',
-    icon: (p) => (
-      <svg class={p.class} viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd" />
-      </svg>
-    ),
-  },
-  {
-    path: '/api-explorer',
-    label: 'API Explorer',
-    icon: (p) => (
-      <svg class={p.class} viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z" clip-rule="evenodd" />
-      </svg>
-    ),
-  },
-  {
-    path: '/roles',
-    label: 'Roles',
-    icon: (p) => (
-      <svg class={p.class} viewBox="0 0 20 20" fill="currentColor">
-        <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
-      </svg>
-    ),
-  },
-  {
-    path: '/api-keys',
-    label: 'API Keys',
-    icon: (p) => (
-      <svg class={p.class} viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clip-rule="evenodd" />
-      </svg>
-    ),
-  },
-  {
-    path: '/mcp',
-    label: 'MCP Server',
-    icon: (p) => (
-      <svg class={p.class} viewBox="0 0 20 20" fill="currentColor">
-        <path d="M13 7H7v6h6V7z" />
-        <path fill-rule="evenodd" d="M7 2a1 1 0 012 0v1h2V2a1 1 0 112 0v1h2a2 2 0 012 2v2h1a1 1 0 110 2h-1v2h1a1 1 0 110 2h-1v2a2 2 0 01-2 2h-2v1a1 1 0 11-2 0v-1H9v1a1 1 0 11-2 0v-1H5a2 2 0 01-2-2v-2H2a1 1 0 110-2h1V9H2a1 1 0 010-2h1V5a2 2 0 012-2h2V2zM5 5h10v10H5V5z" clip-rule="evenodd" />
-      </svg>
-    ),
-  },
-  {
-    path: '/settings',
-    label: 'Settings',
-    icon: (p) => (
-      <svg class={p.class} viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
-      </svg>
-    ),
+    heading: 'Integrations',
+    items: [{ path: '/mcp', label: 'AI agents (MCP)', icon: 'sparkle' }],
   },
 ];
 
-interface SidebarProps {
-  currentPath: string;
-  isOpen: boolean;
-  onClose: () => void;
+const THEME_NEXT: Record<ThemeChoice, ThemeChoice> = { system: 'dark', dark: 'light', light: 'system' };
+const THEME_ICON: Record<ThemeChoice, IconName> = { system: 'monitor', dark: 'moon', light: 'sun' };
+const THEME_LABEL: Record<ThemeChoice, string> = { system: 'Theme: system', dark: 'Theme: dark', light: 'Theme: light' };
+
+function isActive(current: string, path: string) {
+  const p = current.split('?')[0];
+  return path === '/' ? p === '/' : p === path || p.startsWith(path + '/');
 }
 
-export function Sidebar({ currentPath, isOpen, onClose }: SidebarProps) {
+export function Sidebar({ currentPath, isOpen, onClose, onLogout }: {
+  currentPath: string; isOpen: boolean; onClose: () => void; onLogout: () => void;
+}) {
+  const info = useServerInfo();
+  const { health, checks } = useHealth();
+  const [theme, setThemeState] = useState<ThemeChoice>(getTheme());
+  const email = localStorage.getItem('faucet_admin_email');
+
+  const down = Object.entries(checks).filter(([, v]) => v !== 'ok').map(([k]) => k);
+  const healthText =
+    health === 'down' ? 'Server unreachable'
+      : health === 'degraded' ? `${down.length === 1 ? `${down[0]} is` : `${down.length} databases are`} unreachable`
+      : health === 'ok' ? 'All systems normal'
+      : 'Checking';
+  const healthColor = health === 'ok' ? 'bg-ok' : health === 'unknown' ? 'bg-fg-faint' : health === 'degraded' ? 'bg-warn' : 'bg-bad';
+
   return (
     <aside
-      class={`
-        fixed lg:static inset-y-0 left-0 z-40
-        w-64 bg-surface-raised border-r border-border-subtle
-        flex flex-col
-        transition-transform duration-200 ease-out
-        ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-      `}
+      class={`fixed lg:sticky top-0 inset-y-0 left-0 z-40 w-[240px] h-screen shrink-0 flex flex-col bg-panel border-r border-line
+        transition-transform duration-200 ease-out ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+      aria-label="Main navigation"
     >
-      {/* Logo */}
-      <div class="flex items-center gap-3 px-5 h-16 border-b border-border-subtle shrink-0">
-        <img src="/faucet-icon.svg" alt="Faucet" width="28" height="28" class="shrink-0" />
-        <div>
-          <span class="text-base font-semibold text-text-primary tracking-tight">Faucet</span>
-          <span class="text-xs text-text-muted ml-2">Admin</span>
-        </div>
+      <div class="flex items-center gap-2.5 px-4 h-14 shrink-0">
+        <img src="/faucet-icon.svg" alt="" width="24" height="24" />
+        <span class="text-lg font-semibold tracking-[-0.01em] text-fg">Faucet</span>
+        <button type="button" onClick={onClose} class="ml-auto lg:hidden p-1.5 rounded text-fg-muted hover:text-fg" aria-label="Close menu">
+          <Icon name="x" size={18} />
+        </button>
       </div>
 
-      {/* Navigation */}
-      <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {navItems.map((item) => {
-          const isActive = currentPath === item.path ||
-            (item.path !== '/' && currentPath.startsWith(item.path));
-          return (
-            <a
-              key={item.path}
-              href={item.path}
-              onClick={(e) => {
-                // Let preact-router handle navigation
-              }}
-              class={`
-                flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
-                transition-colors duration-150 group
-                ${isActive
-                  ? 'bg-brand/10 text-brand'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-surface-overlay'
-                }
-              `}
-            >
-              <item.icon class={`w-5 h-5 shrink-0 ${isActive ? 'text-brand' : 'text-text-muted group-hover:text-text-secondary'}`} />
-              {item.label}
-              {isActive && (
-                <div class="ml-auto w-1.5 h-1.5 rounded-full bg-brand" />
-              )}
-            </a>
-          );
-        })}
+      <nav class="flex-1 overflow-y-auto px-2.5 pb-4">
+        {NAV.map((group, gi) => (
+          <div key={gi} class={gi > 0 ? 'mt-5' : 'mt-1'}>
+            {group.heading && <p class="px-2.5 mb-1 text-xs font-medium text-fg-faint">{group.heading}</p>}
+            <ul class="flex flex-col gap-0.5">
+              {group.items.map((item) => {
+                const active = isActive(currentPath, item.path);
+                return (
+                  <li key={item.path}>
+                    <a
+                      href={item.path}
+                      aria-current={active ? 'page' : undefined}
+                      class={`flex items-center gap-2.5 h-8 px-2.5 rounded-[6px] text-[13.5px] transition-colors ${
+                        active ? 'bg-brand/10 text-fg font-medium' : 'text-fg-muted hover:text-fg hover:bg-panel-2'
+                      }`}
+                    >
+                      <Icon name={item.icon} size={16} class={active ? 'text-brand-fg' : ''} />
+                      {item.label}
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
       </nav>
 
-      {/* Footer */}
-      <div class="px-5 py-4 border-t border-border-subtle">
-        <div class="flex items-center gap-2 text-xs text-text-muted">
-          <div class="w-2 h-2 rounded-full bg-success animate-pulse" />
-          <span>Faucet v0.1.0</span>
+      <div class="border-t border-line px-2.5 py-2.5 flex flex-col gap-0.5">
+        <a href="/services" class="flex items-center gap-2.5 h-8 px-2.5 rounded-[6px] text-sm text-fg-muted hover:text-fg hover:bg-panel-2" title={down.length ? `Unreachable: ${down.join(', ')}` : undefined}>
+          <span class={`w-2 h-2 rounded-full ${healthColor}`} aria-hidden="true" />
+          <span class="truncate">{healthText}</span>
+        </a>
+        <a href="/settings" aria-current={isActive(currentPath, '/settings') ? 'page' : undefined}
+          class={`flex items-center gap-2.5 h-8 px-2.5 rounded-[6px] text-sm ${isActive(currentPath, '/settings') ? 'bg-brand/10 text-fg font-medium' : 'text-fg-muted hover:text-fg hover:bg-panel-2'}`}>
+          <Icon name="settings" size={16} />
+          Settings
+        </a>
+        <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" class="flex items-center gap-2.5 h-8 px-2.5 rounded-[6px] text-sm text-fg-muted hover:text-fg hover:bg-panel-2">
+          <Icon name="book" size={16} />
+          Documentation
+          <Icon name="external" size={12} class="ml-auto opacity-60" />
+        </a>
+        <div class="flex items-center gap-1 mt-1.5 pt-2.5 border-t border-line px-1">
+          <div class="min-w-0 flex-1 px-1.5">
+            <p class="text-xs text-fg truncate" title={email || undefined}>{email || 'Admin'}</p>
+            <a href={`${GITHUB_URL}/releases`} target="_blank" rel="noopener noreferrer" class="text-xs text-fg-faint hover:text-fg-muted font-mono">
+              {info?.version || ''}
+            </a>
+          </div>
+          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center w-8 h-8 rounded-[6px] text-fg-muted hover:text-fg hover:bg-panel-2" title="Faucet on GitHub" aria-label="Faucet on GitHub">
+            <Icon name="github" size={16} />
+          </a>
+          <button
+            type="button"
+            class="inline-flex items-center justify-center w-8 h-8 rounded-[6px] text-fg-muted hover:text-fg hover:bg-panel-2"
+            title={THEME_LABEL[theme]}
+            aria-label={THEME_LABEL[theme]}
+            onClick={() => {
+              const next = THEME_NEXT[theme];
+              setTheme(next);
+              setThemeState(next);
+            }}
+          >
+            <Icon name={THEME_ICON[theme]} size={16} />
+          </button>
+          <button type="button" onClick={onLogout} class="inline-flex items-center justify-center w-8 h-8 rounded-[6px] text-fg-muted hover:text-fg hover:bg-panel-2" title="Sign out" aria-label="Sign out">
+            <Icon name="logout" size={16} />
+          </button>
         </div>
       </div>
     </aside>

@@ -40,6 +40,28 @@ func readJSON(r *http.Request, v interface{}) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
+// readJSONFields decodes the body into v like readJSON and also reports which
+// top-level keys were present, so handlers can tell "set to empty" apart from
+// "not sent".
+func readJSONFields(r *http.Request, v interface{}) (map[string]bool, error) {
+	defer r.Body.Close()
+	var raw json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(raw, v); err != nil {
+		return nil, err
+	}
+	var keys map[string]json.RawMessage
+	present := map[string]bool{}
+	if json.Unmarshal(raw, &keys) == nil {
+		for k := range keys {
+			present[k] = true
+		}
+	}
+	return present, nil
+}
+
 // queryInt extracts an integer query parameter, returning defaultVal if the
 // parameter is missing or cannot be parsed.
 func queryInt(r *http.Request, key string, defaultVal int) int {

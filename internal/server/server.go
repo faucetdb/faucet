@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -34,6 +35,7 @@ type Config struct {
 	CORSOrigins     []string
 	EnableUI        bool
 	MaxBodySize     int64 // bytes
+	Version         string
 }
 
 // DefaultConfig returns a Config with sensible production defaults.
@@ -100,18 +102,19 @@ func (s *Server) setupRouter() {
 	r.Get("/openapi.json", handler.NewOpenAPIHandler(s.registry, s.store).ServeCombinedSpec)
 
 	// --- MCP Streamable HTTP endpoint (remote AI agent access) ---
+	// The admin UI also has a page at /mcp. Both share the path, so the SPA
+	// route below only answers browser navigations (Accept: text/html) and
+	// passes every other GET (such as an MCP client's event stream) here.
 	mcpSrv := fmcp.NewMCPServer(s.registry, s.store, s.logger)
-	mcpHandler := mcpSrv.HTTPHandler()
-	r.Group(func(r chi.Router) {
-		r.Use(middleware.Authenticate(s.authSvc))
-		r.Handle("/mcp", mcpHandler)
-	})
+	mcpHandler := middleware.Authenticate(s.authSvc)(mcpSrv.HTTPHandler())
+	r.Handle("/mcp", mcpHandler)
 
 	// --- API routes ---
 	r.Route("/api/v1", func(r chi.Router) {
 
 		// Setup endpoints — unauthenticated, only work when no admin exists
 		sysHandler := handler.NewSystemHandler(s.store, s.authSvc, s.registry)
+		sysHandler.Version = s.cfg.Version
 		r.Get("/setup", sysHandler.SetupStatus)
 		r.Post("/setup", sysHandler.SetupCreateAdmin)
 
@@ -134,6 +137,8 @@ func (s *Server) setupRouter() {
 				r.Put("/service/{serviceName}", sysHandler.UpdateService)
 				r.Delete("/service/{serviceName}", sysHandler.DeleteService)
 				r.Get("/service/{serviceName}/test", sysHandler.TestConnection)
+				r.Post("/connection/test", sysHandler.ProbeConnection)
+				r.Get("/info", sysHandler.Info)
 
 				// Role management
 				r.Get("/role", sysHandler.ListRoles)
@@ -250,13 +255,26 @@ func (s *Server) setupRouter() {
 			r.Get("/roles", spaHandler)
 			r.Get("/api-keys", spaHandler)
 			r.Get("/settings", spaHandler)
-			r.Get("/mcp", spaHandler)
+			r.Get("/mcp", func(w http.ResponseWriter, r *http.Request) {
+				if wantsHTML(r) {
+					spaHandler(w, r)
+					return
+				}
+				mcpHandler.ServeHTTP(w, r)
+			})
 			// Root serves the SPA
 			r.Get("/", spaHandler)
 		}
 	}
 
 	s.router = r
+}
+
+// wantsHTML reports whether a request is a browser navigation rather than an
+// API or MCP client call.
+func wantsHTML(r *http.Request) bool {
+	accept := r.Header.Get("Accept")
+	return strings.Contains(accept, "text/html") && !strings.Contains(accept, "text/event-stream")
 }
 
 // handleHealthz is a liveness probe. Returns 200 if the process is running.
