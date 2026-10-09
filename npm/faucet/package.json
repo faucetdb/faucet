@@ -1,7 +1,8 @@
 {
   "name": "@faucetdb/faucet",
+  "mcpName": "io.github.faucetdb/faucet",
   "version": "0.0.0",
-  "description": "Turn any SQL database into a secure REST API + MCP server. One binary. One command.",
+  "description": "Turn PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, Snowflake or SQLite into a REST API + MCP server for AI agents. Single binary.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -17,16 +18,29 @@
   "keywords": [
     "database",
     "rest-api",
+    "rest-api-generator",
     "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "ai-agents",
+    "ai",
+    "llm",
+    "claude",
+    "cursor",
     "postgresql",
+    "postgres",
     "mysql",
+    "mariadb",
     "sql-server",
+    "mssql",
     "oracle",
     "snowflake",
     "sqlite",
     "api-generator",
     "openapi",
-    "rbac"
+    "rbac",
+    "self-hosted",
+    "postgrest-alternative"
   ],
   "bin": {
     "faucet": "bin/faucet"
