@@ -269,7 +269,7 @@ func (h *SystemHandler) CreateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := resolveDSN(&svc, ""); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusBadRequest, "Invalid connection details: "+err.Error())
 		return
 	}
 	if svc.DSN == "" {
@@ -368,7 +368,7 @@ func (h *SystemHandler) UpdateService(w http.ResponseWriter, r *http.Request) {
 	if updates.DSN == "" && updates.Connection != nil {
 		updates.Driver = existing.Driver
 		if err := resolveDSN(&updates, existing.DSN); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusBadRequest, "Invalid connection details: "+err.Error())
 			return
 		}
 	}
@@ -456,7 +456,7 @@ func resolveDSN(svc *model.ServiceConfig, existingDSN string) error {
 	params := connector.MergeStoredPassword(svc.Driver, existingDSN, *svc.Connection)
 	dsn, err := connector.BuildDSN(svc.Driver, params)
 	if err != nil {
-		return fmt.Errorf("Invalid connection details: %w", err)
+		return err
 	}
 	if existingDSN != "" && len(svc.Connection.Options) == 0 {
 		dsn = connector.KeepExtraParams(svc.Driver, existingDSN, dsn)
@@ -501,7 +501,7 @@ func (h *SystemHandler) ProbeConnection(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if err := resolveDSN(&svc, existingDSN); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusBadRequest, "Invalid connection details: "+err.Error())
 		return
 	}
 	if svc.DSN == "" {
