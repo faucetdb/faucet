@@ -1,11 +1,17 @@
 <p align="center">
-  <img src="ui/public/faucet-logo.svg" alt="Faucet — open-source database to REST API server" height="60">
+  <img src="ui/public/faucet-logo.svg" alt="Faucet logo" height="60">
 </p>
 
-<h3 align="center">Turn any SQL database into a secure REST API.<br>One binary. One command.</h3>
+<h1 align="center">Faucet: REST API and MCP server for any SQL database</h1>
+
+<h3 align="center">Turn any SQL database into a secure REST API and MCP server.<br>One binary. One command.</h3>
 
 <p align="center">
-  Faucet is an open-source, single-binary API server that auto-generates REST endpoints, OpenAPI specs, and MCP tools from your database schema at runtime. No code generation, no ORM, no boilerplate.
+  <strong>Faucet is an open-source (MIT) single Go binary that turns PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, Snowflake or SQLite into a REST API and an MCP server for AI agents, with role-based access control (RBAC), OpenAPI 3.1 and a built-in admin UI.</strong>
+</p>
+
+<p align="center">
+  Endpoints, OpenAPI specs and MCP tools are generated from your database schema at runtime. No code generation, no ORM, no boilerplate.
 </p>
 
 <p align="center">
@@ -17,6 +23,7 @@
 </p>
 
 <p align="center">
+  <a href="https://faucetdb.ai">Website</a> &middot;
   <a href="https://wiki.faucetdb.ai">Docs</a> &middot;
   <a href="#60-second-quickstart">Getting Started</a> &middot;
   <a href="https://hub.docker.com/r/faucetdb/faucet">Docker</a> &middot;
@@ -28,9 +35,9 @@
 
 ## What is Faucet?
 
-Faucet is a **database-to-REST-API gateway** — a lightweight, self-hosted server that connects to your SQL databases, introspects the schema, and generates a full CRUD REST API with authentication, role-based access control (RBAC), and OpenAPI documentation. It also exposes an **MCP server** so AI agents (Claude, GPT, etc.) can query your data directly.
+Faucet is a **database-to-REST-API gateway** — a lightweight, self-hosted server that connects to your SQL databases, introspects the schema, and generates a full CRUD REST API with authentication, role-based access control (RBAC), and OpenAPI documentation. It also exposes an **MCP server** at `/mcp` so AI agents and AI app builders (Claude, ChatGPT, Cursor, VS Code, Windsurf, Base44, Replit) can query your data through the same roles and API keys.
 
-Think of it as an open-source alternative to [DreamFactory](https://www.dreamfactory.com/), [PostgREST](https://postgrest.org/), or [Hasura](https://hasura.io/) — but with multi-database support, a built-in admin UI, and native AI agent integration, all in a single binary.
+Think of it as an open-source alternative to [DreamFactory](https://www.dreamfactory.com/), [PostgREST](https://postgrest.org/), or [Hasura](https://hasura.io/), with multi-database support, a built-in admin UI, and native AI agent integration, all in a single binary. See [how it compares](#faucet-vs-postgrest-vs-hasura-vs-dreamfactory-vs-supabase).
 
 <p align="center"><img src="screenshots/admin-databases.webp" alt="Faucet admin UI listing connected PostgreSQL and SQLite databases" width="800"></p>
 
@@ -111,9 +118,9 @@ See the [Admin UI guide](https://wiki.faucetdb.ai/admin-ui) for a tour of every 
 - **Schema contract locking** — Lock your API contract against silent breaking schema changes with three modes (none, auto, strict), drift detection, and CLI management
 
 ### AI Agent Integration (MCP)
-- **Built-in MCP server** — 8 tools + 2 resources for Model Context Protocol
-- **Claude Desktop ready** — Drop-in config for Claude Desktop and Claude Code
-- **stdio + HTTP transport** — Works locally or over the network
+- **Built-in MCP server** — 8 tools + 2 resources for Model Context Protocol, served at `/mcp` on the same port as the REST API
+- **Works with your AI tools** — Copy-ready configs for Claude Code, Claude Desktop, Cursor, VS Code and Windsurf; ChatGPT via a Custom GPT Action on `/openapi.json`
+- **Streamable HTTP + stdio transport** — API-key authenticated over the network, or stdio on your own machine
 - **Governed AI queries** — AI agents respect the same RBAC rules as API clients
 
 ### Developer Experience
@@ -127,15 +134,17 @@ See the [Admin UI guide](https://wiki.faucetdb.ai/admin-ui) for a tour of every 
 
 ## Supported Databases
 
-| Database | Versions | Cloud Variants |
-|----------|----------|----------------|
-| **PostgreSQL** | 9.6 – 17 | Amazon RDS, Aurora, Supabase, Neon, Azure Database |
-| **MySQL** | 5.7 – 9.x | Amazon RDS, Aurora MySQL, PlanetScale, Azure MySQL |
-| **MariaDB** | 10.2 – 11.x | Via MySQL driver |
-| **SQL Server** | 2012 – 2022 | Azure SQL Database, Amazon RDS |
-| **Oracle** | 12c – 26ai | Oracle Cloud (OCI), Amazon RDS, Azure |
-| **Snowflake** | Current | AWS, Azure, GCP |
-| **SQLite** | 3.35+ | Local file, in-memory |
+| Database | Versions | Cloud Variants | Tutorial |
+|----------|----------|----------------|----------|
+| **PostgreSQL** | 9.6 – 17 | Amazon RDS, Aurora, Supabase, Neon, Azure Database | [Guide](https://wiki.faucetdb.ai/tutorial-postgres) |
+| **MySQL** | 5.7 – 9.x | Amazon RDS, Aurora MySQL, PlanetScale, Azure MySQL | [Guide](https://wiki.faucetdb.ai/tutorial-mysql) |
+| **MariaDB** | 10.2 – 11.x | Via MySQL driver | [MySQL guide](https://wiki.faucetdb.ai/tutorial-mysql) |
+| **SQL Server** | 2012 – 2022 | Azure SQL Database, Amazon RDS | [Guide](https://wiki.faucetdb.ai/tutorial-sqlserver) |
+| **Oracle** | 12c – 26ai | Oracle Cloud (OCI), Amazon RDS, Azure | [Guide](https://wiki.faucetdb.ai/tutorial-oracle) |
+| **Snowflake** | Current | AWS, Azure, GCP | [Guide](https://wiki.faucetdb.ai/tutorial-snowflake) |
+| **SQLite** | 3.35+ | Local file, in-memory | [Guide](https://wiki.faucetdb.ai/tutorial-sqlite) |
+
+Connector details, SSL options and driver notes: [Database connectors](https://wiki.faucetdb.ai/database-connectors).
 
 ---
 
@@ -196,28 +205,89 @@ curl -H "X-API-Key: faucet_YOUR_KEY_HERE" "http://localhost:8080/api/v1/mydb/_ta
 
 ## MCP Server for AI Agents
 
-Faucet includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server, enabling AI agents like Claude, GPT, and Copilot to query and modify your databases through governed, tool-based access.
+Faucet includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server, so AI agents such as Claude, Cursor, VS Code Copilot and Windsurf can query and modify your databases through governed, tool-based access.
 
-### Claude Desktop / Claude Code
+`faucet serve` exposes the MCP server at **`http://localhost:8080/mcp`** (Streamable HTTP), on the same port as the REST API. Authenticate with an API key in the **`X-API-Key`** header. The key's role controls which databases and tables the agent can see and change, exactly as for the REST API.
 
-Add to your `claude_desktop_config.json`:
+The **AI agents (MCP)** page in the admin UI generates every config below with your key filled in. Replace `YOUR_API_KEY` with a key from the **API keys** page or `faucet key create`.
+
+### Claude Code
+
+```bash
+claude mcp add --transport http faucet http://localhost:8080/mcp \
+  --header "X-API-Key: YOUR_API_KEY"
+```
+
+### Cursor, VS Code, Windsurf
+
+Cursor (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "faucet": {
-      "command": "faucet",
-      "args": ["mcp"]
+      "url": "http://localhost:8080/mcp",
+      "headers": { "X-API-Key": "YOUR_API_KEY" }
     }
   }
 }
 ```
 
-### HTTP Mode (remote clients)
+VS Code (`.vscode/mcp.json`, used by Copilot Chat in agent mode):
 
-```bash
-faucet mcp --transport http --port 3001
+```json
+{
+  "servers": {
+    "faucet": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp",
+      "headers": { "X-API-Key": "YOUR_API_KEY" }
+    }
+  }
+}
 ```
+
+Windsurf (`~/.codeium/windsurf/mcp_config.json`): the same as Cursor, with `serverUrl` instead of `url`.
+
+### Claude Desktop
+
+Claude Desktop's config file only launches local commands, so use the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) bridge (needs Node.js) in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "faucet": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8080/mcp", "--header", "X-API-Key:YOUR_API_KEY"]
+    }
+  }
+}
+```
+
+For a Faucet server on another machine over plain `http://`, add `"--allow-http"` to the args. See [examples/claude-desktop-config.json](examples/claude-desktop-config.json).
+
+### ChatGPT
+
+ChatGPT connectors sign in with OAuth, which Faucet does not support. Use a **Custom GPT Action** instead: expose Faucet over HTTPS, import `https://your-host/openapi.json`, and set authentication to API key with the custom header `X-API-Key`.
+
+### Local stdio (your machine only)
+
+MCP clients can also launch Faucet as a subprocess. stdio mode reads the databases configured with `faucet serve` or `faucet db add` (`~/.faucet` by default) and runs with **local admin rights**: roles are not applied. Use it only on your own machine; for anything shared, use `/mcp` with an API key.
+
+```json
+{
+  "mcpServers": {
+    "faucet": {
+      "command": "npx",
+      "args": ["-y", "@faucetdb/faucet", "mcp"]
+    }
+  }
+}
+```
+
+The same config is in [examples/mcp-stdio-config.json](examples/mcp-stdio-config.json). If `faucet` is installed (Homebrew, Go or a release binary), use `"command": "faucet", "args": ["mcp"]`. `faucet mcp --transport http --port 3001` runs a standalone, API-key authenticated HTTP server on its own port.
+
+Full guide, including a curl test and the OpenAI Responses API: [MCP server docs](https://wiki.faucetdb.ai/mcp-server).
 
 ### Available MCP Tools
 
@@ -357,16 +427,57 @@ POST   /api/v1/{service}/_proc/{proc}            # Call procedure
 
 ---
 
+## Faucet vs PostgREST vs Hasura vs DreamFactory vs Supabase
+
+A short comparison of how each project is shaped. It covers only facts you can check in each project's own docs; if something here is out of date, please [open an issue](https://github.com/faucetdb/faucet/issues).
+
+| | Faucet | PostgREST | Hasura | DreamFactory | Supabase |
+|---|---|---|---|---|---|
+| **Primary API** | REST + OpenAPI 3.1, plus a built-in MCP endpoint at `/mcp` | REST | GraphQL-first | REST | REST (via PostgREST), realtime, auth, storage |
+| **Databases** | PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, Snowflake, SQLite | PostgreSQL | PostgreSQL plus other sources via connectors | Many SQL and NoSQL sources | PostgreSQL |
+| **Admin UI** | Embedded in the binary | None | Console | Web admin app | Studio |
+| **How you run it** | Single Go binary, config in embedded SQLite | Single binary | Engine plus a Postgres metadata database (v2) | PHP/Laravel application | Hosted platform, or self-host a multi-service Docker stack |
+| **License** | MIT | MIT | Apache 2.0 (graphql-engine repo) | Apache 2.0 (open-source edition), paid editions available | Apache 2.0 |
+
+---
+
 ## FAQ
 
+**What is Faucet?**
+Faucet is an open-source (MIT) single Go binary that turns a SQL database into a REST API and an MCP server for AI agents. It supports PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, Snowflake and SQLite, and includes RBAC, an OpenAPI 3.1 spec and a built-in admin UI.
+
+**Which databases does Faucet support?**
+Seven: PostgreSQL, MySQL, MariaDB (through the MySQL driver), SQL Server, Oracle, Snowflake and SQLite. See [Supported Databases](#supported-databases) for versions and per-database tutorials.
+
+**How do I connect Claude Code or Claude Desktop to my database?**
+Run `faucet serve`, connect your database in the admin UI, create an API key, then run `claude mcp add --transport http faucet http://localhost:8080/mcp --header "X-API-Key: YOUR_API_KEY"`. Claude Desktop uses the `mcp-remote` bridge; see [Claude Desktop](#claude-desktop).
+
+**How do I connect Cursor, VS Code or Windsurf?**
+Add `http://localhost:8080/mcp` as an HTTP MCP server with an `X-API-Key` header. Copy-paste configs are in [Cursor, VS Code, Windsurf](#cursor-vs-code-windsurf) and on the admin UI's **AI agents (MCP)** page.
+
+**How do I connect ChatGPT to my database?**
+Expose Faucet over HTTPS, create an API key with a read-only role, and add a Custom GPT Action that imports `https://your-host/openapi.json` with API-key authentication (header `X-API-Key`). ChatGPT connectors need OAuth, which Faucet does not support.
+
+**Can I use Faucet with Base44, Replit or other AI app builders?**
+Yes. Expose Faucet over HTTPS and create a scoped API key. Then add `https://your-host/mcp` with an `X-API-Key` header as a custom MCP server, or call the REST API (`/api/v1/...`) and OpenAPI spec (`/openapi.json`) from your app.
+
+**Is Faucet self-hosted? Where does my data live?**
+Yes. Faucet runs wherever you run it (your laptop, a server next to an on-prem database, a container) and talks to your database directly; rows are not copied anywhere. Its own configuration (connections, roles, API keys, admin accounts) is stored in an embedded SQLite file in the data directory (`~/.faucet` by default, `/data` in Docker). Anonymous usage telemetry is described, with how to turn it off, in [TELEMETRY.md](TELEMETRY.md).
+
+**Is Faucet free?**
+Yes. Faucet is open source under the [MIT license](LICENSE), with no paid tiers for core functionality.
+
 **How is Faucet different from PostgREST?**
-PostgREST only supports PostgreSQL. Faucet supports 7 databases (PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, Snowflake, SQLite), includes a built-in admin UI, and provides native MCP support for AI agents — all in a single binary.
+PostgREST only supports PostgreSQL. Faucet supports 7 databases (PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, Snowflake, SQLite), includes a built-in admin UI, and provides native MCP support for AI agents, all in a single binary.
 
 **How is Faucet different from Hasura?**
-Hasura requires Docker, a PostgreSQL metadata database, and is primarily GraphQL-focused. Faucet is a single binary with no dependencies, generates REST APIs (not GraphQL), and includes built-in MCP server support for AI agent integration.
+Hasura is GraphQL-first. Faucet generates REST APIs with an OpenAPI 3.1 spec (not GraphQL), runs as a single binary that keeps its configuration in an embedded SQLite file, and includes a built-in MCP server for AI agents.
 
 **How is Faucet different from DreamFactory?**
-DreamFactory is a PHP/Laravel application requiring a full LAMP/LEMP stack. Faucet is a single Go binary (~22MB) with zero dependencies. Faucet is fully open-source under MIT license with all features included — no paid tiers required for core functionality.
+DreamFactory is a PHP/Laravel application that runs on a web server stack with PHP. Faucet is a single Go binary with no runtime dependencies. Faucet is fully open-source under the MIT license with all features included, with no paid tiers required for core functionality.
+
+**How is Faucet different from Supabase?**
+Supabase is a PostgreSQL platform (database, auth, storage, realtime) that you use hosted or self-host as a set of services. Faucet does not host your data: it puts a REST API and an MCP server in front of a database you already have, including MySQL, SQL Server, Oracle, Snowflake and SQLite.
 
 **Does Faucet support GraphQL?**
 Not currently. Faucet generates REST APIs and OpenAPI 3.1 specs. GraphQL support may be added in the future.
@@ -375,7 +486,7 @@ Not currently. Faucet generates REST APIs and OpenAPI 3.1 specs. GraphQL support
 Faucet is under active development. It is suitable for internal tools, prototyping, and AI agent integration. Check the [releases page](https://github.com/faucetdb/faucet/releases) for the latest version.
 
 **Can AI agents write data through Faucet?**
-Yes. MCP tools include `faucet_insert`, `faucet_update`, and `faucet_delete`. All operations respect RBAC roles, so you can give AI agents read-only or read-write access per table.
+Yes. MCP tools include `faucet_insert`, `faucet_update`, and `faucet_delete`. All operations respect RBAC roles, so you can give AI agents read-only or read-write access per table. Raw SQL is off unless you allow it for a service and grant all verbs.
 
 **Does Faucet require a separate database for configuration?**
 No. Faucet uses an embedded SQLite database for all configuration, credentials, roles, and API keys. Everything is stored locally in a single file.
@@ -401,7 +512,20 @@ make dev        # Dev mode with hot reload
 
 ## Documentation
 
-Full documentation is available at the [Faucet Wiki](https://wiki.faucetdb.ai).
+Full documentation is at **[wiki.faucetdb.ai](https://wiki.faucetdb.ai)**:
+
+- [Getting started](https://wiki.faucetdb.ai/getting-started): install, connect a database, make your first request
+- [Admin UI guide](https://wiki.faucetdb.ai/admin-ui): a tour of every page
+- [MCP server](https://wiki.faucetdb.ai/mcp-server): connect Claude, Cursor, VS Code, Windsurf and ChatGPT
+- [Roles and API keys (RBAC)](https://wiki.faucetdb.ai/rbac)
+- [Filter syntax](https://wiki.faucetdb.ai/filter-syntax)
+- [API reference](https://wiki.faucetdb.ai/api-reference)
+- [CLI reference](https://wiki.faucetdb.ai/cli-reference)
+- [Schema locking](https://wiki.faucetdb.ai/schema-locking)
+- [Deployment](https://wiki.faucetdb.ai/deployment): Docker, Kubernetes, systemd, reverse proxies, production checklist
+- [Database connectors](https://wiki.faucetdb.ai/database-connectors) and tutorials for [PostgreSQL](https://wiki.faucetdb.ai/tutorial-postgres), [MySQL / MariaDB](https://wiki.faucetdb.ai/tutorial-mysql), [SQL Server](https://wiki.faucetdb.ai/tutorial-sqlserver), [Oracle](https://wiki.faucetdb.ai/tutorial-oracle), [Snowflake](https://wiki.faucetdb.ai/tutorial-snowflake) and [SQLite](https://wiki.faucetdb.ai/tutorial-sqlite)
+- [Architecture](https://wiki.faucetdb.ai/architecture)
+- [LLM guide](https://wiki.faucetdb.ai/llm-guide): a compact reference written for AI coding assistants
 
 ## Contributing
 
