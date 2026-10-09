@@ -1,0 +1,76 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.faucetdb/faucet",
+  "title": "Faucet",
+  "description": "SQL database to MCP tools and REST API: PostgreSQL, MySQL, SQL Server, Oracle, SQLite, Snowflake.",
+  "websiteUrl": "https://wiki.faucetdb.ai/mcp-server",
+  "repository": {
+    "url": "https://github.com/faucetdb/faucet",
+    "source": "github"
+  },
+  "version": "0.1.15",
+  "icons": [
+    {
+      "src": "https://faucetdb.ai/faucet-icon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": ["any"]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@faucetdb/faucet",
+      "version": "0.1.15",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "FAUCET_DATA_DIR",
+          "description": "Faucet data directory holding the databases you connected with `faucet serve` or `faucet db add`. Default: ~/.faucet. stdio mode runs with local admin rights.",
+          "format": "filepath",
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "registryType": "oci",
+      "identifier": "docker.io/faucetdb/faucet:0.1.15",
+      "runtimeHint": "docker",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:8080/mcp",
+        "headers": [
+          {
+            "name": "X-API-Key",
+            "description": "Faucet API key (create one on the API keys page of the admin UI); its role's RBAC rules apply to every tool call.",
+            "isRequired": true,
+            "isSecret": true
+          }
+        ]
+      },
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "-p",
+          "value": "8080:8080",
+          "description": "Publish Faucet's HTTP port (admin UI, REST API and /mcp)"
+        },
+        {
+          "type": "named",
+          "name": "-v",
+          "value": "faucet-data:/data",
+          "description": "Persist Faucet's config (databases, roles, API keys)"
+        }
+      ]
+    }
+  ]
+}

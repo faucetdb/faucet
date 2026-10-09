@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use Faucet in your work, please cite it using these metadata."
+title: "Faucet"
+type: software
+abstract: >-
+  Faucet is an open-source (MIT) single Go binary that turns PostgreSQL,
+  MySQL, MariaDB, SQL Server, Oracle, Snowflake or SQLite into a REST API and
+  an MCP server for AI agents, with role-based access control, OpenAPI 3.1
+  and a built-in admin UI.
+authors:
+  - name: "FaucetDB"
+    email: developers@faucetdb.ai
+    website: "https://faucetdb.ai"
+repository-code: "https://github.com/faucetdb/faucet"
+url: "https://faucetdb.ai"
+license: MIT
+keywords:
+  - mcp-server
+  - model-context-protocol
+  - rest-api
+  - openapi
+  - rbac
+  - ai-agents
+  - postgresql
+  - mysql
+  - mariadb
+  - sql-server
+  - oracle
+  - snowflake
+  - sqlite
+version: 0.1.14
+date-released: "2026-10-09"

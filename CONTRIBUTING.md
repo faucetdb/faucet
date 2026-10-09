@@ -19,7 +19,7 @@ make test
 1. Fork the repo and create a branch from `main`
 2. Make your changes
 3. Run `make test` and `make lint` before committing
-4. Open a PR targeting the `dev` branch
+4. Open a PR targeting the `main` branch
 
 ### Useful Commands
 
@@ -39,10 +39,13 @@ make test
 ```
 cmd/faucet/       → CLI entrypoint (Cobra)
 internal/
-  api/            → HTTP handlers and middleware (Chi router)
+  server/         → HTTP server and routes (Chi router)
+  handler/        → REST API handlers
+  connector/      → Database drivers (PostgreSQL, MySQL/MariaDB, SQL Server, Oracle, Snowflake, SQLite)
   config/         → SQLite config store
-  connector/      → Database drivers (PostgreSQL, MySQL, SQL Server, Snowflake, SQLite)
+  rbac/           → Role-based access control
   mcp/            → MCP server implementation
+  openapi/        → OpenAPI 3.1 generation
   ui/             → Embedded admin UI assets
 ui/               → Preact + Vite + Tailwind source
 ```
@@ -51,7 +54,7 @@ ui/               → Preact + Vite + Tailwind source
 
 - **Bug fixes** — Always welcome. Include a test if possible.
 - **New database connectors** — Implement the `connector.Connector` interface.
-- **Documentation** — Improvements to the [wiki](https://github.com/faucetdb/wiki) are appreciated.
+- **Documentation** — Improvements to this README and to the [docs](https://wiki.faucetdb.ai) are appreciated (open an issue for docs changes).
 - **Performance improvements** — Include benchmark results (`make bench`).
 
 ## Code Style
@@ -62,6 +65,8 @@ ui/               → Preact + Vite + Tailwind source
 - Keep PRs focused. One feature or fix per PR.
 
 ## Reporting Bugs
+
+Security issues: please follow [SECURITY.md](SECURITY.md) instead of opening a public issue.
 
 Open an [issue](https://github.com/faucetdb/faucet/issues) with:
 - Faucet version (`faucet version`)

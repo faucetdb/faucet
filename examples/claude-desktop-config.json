@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "faucet": {
-      "command": "faucet",
-      "args": ["mcp"]
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8080/mcp", "--header", "X-API-Key:YOUR_API_KEY"]
     }
   }
 }

@@ -1,8 +1,9 @@
 {
   "name": "@faucetdb/darwin-arm64",
   "version": "0.0.0",
-  "description": "Faucet binary for macOS arm64 (Apple Silicon)",
+  "description": "Platform binary for @faucetdb/faucet (macOS arm64, Apple silicon). Install @faucetdb/faucet instead.",
   "license": "MIT",
+  "homepage": "https://faucetdb.ai",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/faucetdb/faucet.git"

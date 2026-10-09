@@ -26,6 +26,14 @@ COPY --from=go-builder /faucet /usr/local/bin/faucet
 RUN addgroup -S faucet && adduser -S faucet -G faucet
 RUN mkdir -p /data && chown faucet:faucet /data
 
+LABEL io.modelcontextprotocol.server.name="io.github.faucetdb/faucet" \
+      org.opencontainers.image.title="Faucet" \
+      org.opencontainers.image.description="REST API and MCP server for any SQL database" \
+      org.opencontainers.image.url="https://faucetdb.ai" \
+      org.opencontainers.image.documentation="https://wiki.faucetdb.ai" \
+      org.opencontainers.image.source="https://github.com/faucetdb/faucet" \
+      org.opencontainers.image.licenses="MIT"
+
 ENV FAUCET_DATA_DIR=/data
 EXPOSE 8080
 VOLUME /data

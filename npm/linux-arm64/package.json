@@ -1,8 +1,9 @@
 {
   "name": "@faucetdb/linux-arm64",
   "version": "0.0.0",
-  "description": "Faucet binary for Linux arm64",
+  "description": "Platform binary for @faucetdb/faucet (Linux arm64). Install @faucetdb/faucet instead.",
   "license": "MIT",
+  "homepage": "https://faucetdb.ai",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/faucetdb/faucet.git"

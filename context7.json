@@ -1,0 +1,14 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "Faucet (faucetdb)",
+  "description": "Open-source single Go binary that turns a SQL database (PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, SQLite, Snowflake) into a REST API and MCP server with RBAC, OpenAPI 3.1 and an admin UI.",
+  "excludeFolders": ["internal", "cmd", "ui", "npm", "scripts", "benchmarks", "screenshots", ".github"],
+  "rules": [
+    "Send the API key in the X-API-Key header for /api/v1/* and /mcp.",
+    "REST paths are /api/v1/{service}/_table/{table}; the combined OpenAPI 3.1 spec is at /openapi.json.",
+    "Use include_count=true (not count=true) to get a total record count.",
+    "Prefer the built-in /mcp endpoint with a read-only role; stdio `faucet mcp` runs with admin rights.",
+    "Connect databases with host/port/user/password (faucet db add --host --user --password --database); --dsn is optional.",
+    "Row-level filters on role rules are stored but not enforced yet; do not rely on them for isolation."
+  ]
+}
