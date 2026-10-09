@@ -25,12 +25,15 @@ func Execute(version, commit, date string) error {
 func newRootCmd(version, commit, date string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "faucet",
-		Short: "Turn any database into a secure REST API",
-		Long: `Faucet: Turn any database into a secure REST API. One binary. One command. Zero configuration.
+		Short: "Turn any SQL database into a secure REST API and MCP server",
+		Long: `Faucet: Turn any SQL database into a secure REST API and MCP server. One binary. One command.
 
-Faucet connects to your SQL databases, introspects their schemas, and automatically
-generates production-ready REST APIs with filtering, pagination, RBAC, OpenAPI docs,
-and a built-in MCP server for AI agents.`,
+Faucet connects to PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, Snowflake and
+SQLite, introspects their schemas, and generates REST APIs with filtering,
+pagination, RBAC and an OpenAPI 3.1 spec. 'faucet serve' also exposes an MCP
+server for AI agents at /mcp (API key in the X-API-Key header).
+
+Docs: https://wiki.faucetdb.ai`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
