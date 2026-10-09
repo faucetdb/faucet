@@ -279,7 +279,16 @@ publish_pkg() {
     log "Publishing ${name}@${NPM_VERSION}"
   fi
   # shellcheck disable=SC2086  # PUBLISH_FLAGS is intentionally word-split
-  if ! (cd "$dir" && npm publish $PUBLISH_FLAGS); then
+  local out status=0
+  out="$(cd "$dir" && npm publish $PUBLISH_FLAGS 2>&1)" || status=$?
+  printf '%s\n' "$out"
+  if [[ $status -ne 0 ]] && grep -qiE 'previously (staged|published) version|cannot publish over' <<<"$out"; then
+    # A newly published version can take minutes to show up in "npm view",
+    # so a re-run may try to publish it again. npm refuses; that's success.
+    log "${name}@${NPM_VERSION} is already on npm (not yet visible), skipping"
+    return 0
+  fi
+  if [[ $status -ne 0 ]]; then
     if [[ -z "$NPM_TOKEN" && "$DRY_RUN" != "1" ]]; then
       cat >&2 <<EOF
 

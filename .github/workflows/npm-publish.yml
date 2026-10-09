@@ -109,6 +109,13 @@ jobs:
             | (.packages[] | select(.registryType == "oci") | .identifier) = ("docker.io/faucetdb/faucet:" + $v)
           ' server.json > server.tmp && mv server.tmp server.json
           curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          # The registry checks this exact npm version, which can take a few
+          # minutes to become visible after "npm publish" returns.
+          for i in $(seq 1 40); do
+            [ "$(npm view "@faucetdb/faucet@${V}" mcpName 2>/dev/null)" = "io.github.faucetdb/faucet" ] && break
+            echo "Waiting for @faucetdb/faucet@${V} to appear on npm ($i/40)"
+            sleep 15
+          done
           ./mcp-publisher validate
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
