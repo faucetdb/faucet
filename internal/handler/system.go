@@ -585,11 +585,15 @@ func (h *SystemHandler) ReconnectService(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusServiceUnavailable, "Reconnect failed: "+err.Error())
 		return
 	}
-	if conn, err := h.registry.Get(name); err == nil {
-		if err := conn.Ping(r.Context()); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "Reconnected, but the database did not respond: "+err.Error())
-			return
-		}
+	// The service may have been paused or removed while connecting.
+	conn, err := h.registry.Get(name)
+	if err != nil {
+		writeServiceError(w, name, err)
+		return
+	}
+	if err := conn.Ping(r.Context()); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Reconnected, but the database did not respond: "+err.Error())
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -668,7 +672,10 @@ func (h *SystemHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "Connection failed: "+connErr.Error())
 			return
 		}
-		conn, _ = h.registry.Get(name)
+		if conn, err = h.registry.Get(name); err != nil {
+			writeServiceError(w, name, err)
+			return
+		}
 	}
 
 	if err := conn.Ping(r.Context()); err != nil {
