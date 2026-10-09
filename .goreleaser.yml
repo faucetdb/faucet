@@ -37,12 +37,40 @@ checksum:
   name_template: "checksums.txt"
 
 changelog:
+  use: github
   sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]-]+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\([[:word:]-]+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
-      - "^ci:"
+      - "^docs[:(]"
+      - "^test[:(]"
+      - "^ci[:(]"
+      - "^chore[:(]"
+
+release:
+  # Keep notes written by hand on a release created before the tag is pushed.
+  mode: keep-existing
+  header: |
+    Faucet turns a SQL database (PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, Snowflake, SQLite) into a REST API and an MCP server for AI agents.
+  footer: |
+    ## Install / upgrade
+
+    ```bash
+    npx @faucetdb/faucet@{{ .Version }} serve
+    brew install faucetdb/tap/faucet        # or: brew upgrade faucet
+    docker run -p 8080:8080 -v faucet-data:/data faucetdb/faucet:{{ .Version }}
+    go install github.com/faucetdb/faucet/cmd/faucet@{{ .Tag }}
+    ```
+
+    Docs: https://wiki.faucetdb.ai · MCP setup: https://wiki.faucetdb.ai/mcp-server · Admin UI: https://wiki.faucetdb.ai/admin-ui
 
 dockers:
   - id: amd64
@@ -54,6 +82,15 @@ dockers:
       - "faucetdb/faucet:latest-amd64"
     build_flag_templates:
       - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title=Faucet"
+      - "--label=org.opencontainers.image.description=REST API and MCP server for any SQL database"
+      - "--label=org.opencontainers.image.url=https://faucetdb.ai"
+      - "--label=org.opencontainers.image.documentation=https://wiki.faucetdb.ai"
+      - "--label=org.opencontainers.image.source=https://github.com/faucetdb/faucet"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
 
   - id: arm64
     goos: linux
@@ -64,6 +101,15 @@ dockers:
       - "faucetdb/faucet:latest-arm64"
     build_flag_templates:
       - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title=Faucet"
+      - "--label=org.opencontainers.image.description=REST API and MCP server for any SQL database"
+      - "--label=org.opencontainers.image.url=https://faucetdb.ai"
+      - "--label=org.opencontainers.image.documentation=https://wiki.faucetdb.ai"
+      - "--label=org.opencontainers.image.source=https://github.com/faucetdb/faucet"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
 
 docker_manifests:
   - name_template: "faucetdb/faucet:{{ .Version }}"
@@ -82,8 +128,8 @@ brews:
       owner: faucetdb
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: "https://faucet.dev"
-    description: "Turn any database into a secure REST API. One binary. One command."
+    homepage: "https://faucetdb.ai"
+    description: "Turn a SQL database into a REST API and MCP server for AI agents"
     license: "MIT"
     install: |
       bin.install "faucet"
