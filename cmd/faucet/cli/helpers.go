@@ -238,3 +238,13 @@ func versionString() string {
 	}
 	return "v" + appVersion
 }
+
+// displayHost turns a wildcard listen address into one a browser can open,
+// so the printed URLs are clickable.
+func displayHost(host string) string {
+	switch host {
+	case "", "0.0.0.0", "::", "[::]":
+		return "localhost"
+	}
+	return host
+}

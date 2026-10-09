@@ -36,6 +36,10 @@ type MCPServer struct {
 	enforcer *rbac.Enforcer
 }
 
+// Version is reported to clients in the MCP handshake. The CLI sets it to the
+// build version before creating servers.
+var Version = "dev"
+
 // NewMCPServer creates an MCPServer pre-loaded with all Faucet tools and
 // resources. The returned server is ready to serve over stdio or HTTP.
 func NewMCPServer(registry *connector.Registry, store *config.Store, logger *slog.Logger) *MCPServer {
@@ -48,7 +52,7 @@ func NewMCPServer(registry *connector.Registry, store *config.Store, logger *slo
 
 	mcpServer := server.NewMCPServer(
 		"Faucet Database API",
-		"0.1.0",
+		Version,
 		server.WithResourceCapabilities(true, false),
 		server.WithToolCapabilities(true),
 	)

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -23,6 +24,9 @@ type SystemHandler struct {
 	store    *config.Store
 	authSvc  *service.AuthService
 	registry *connector.Registry
+
+	// Version is the running Faucet version, reported by Info and MCPInfo.
+	Version string
 }
 
 // NewSystemHandler creates a new SystemHandler.
@@ -262,8 +266,12 @@ func (h *SystemHandler) CreateService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Driver is required")
 		return
 	}
+	if err := resolveDSN(&svc, ""); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if svc.DSN == "" {
-		writeError(w, http.StatusBadRequest, "DSN is required")
+		writeError(w, http.StatusBadRequest, "Provide connection details or a DSN")
 		return
 	}
 
@@ -354,6 +362,13 @@ func (h *SystemHandler) UpdateService(w http.ResponseWriter, r *http.Request) {
 	if updates.Driver != "" {
 		existing.Driver = updates.Driver
 	}
+	if updates.DSN == "" && updates.Connection != nil {
+		updates.Driver = existing.Driver
+		if err := resolveDSN(&updates, existing.DSN); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	if updates.DSN != "" {
 		existing.DSN = connector.SanitizeDSN(existing.Driver, updates.DSN)
 	}
@@ -424,6 +439,98 @@ func (h *SystemHandler) DeleteService(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "Service '" + name + "' deleted",
 	})
+}
+
+// resolveDSN fills svc.DSN from svc.Connection when no DSN was given. An
+// empty password is taken from existingDSN so edits don't require re-typing
+// it.
+func resolveDSN(svc *model.ServiceConfig, existingDSN string) error {
+	if svc.DSN != "" || svc.Connection == nil {
+		return nil
+	}
+	params := connector.MergeStoredPassword(svc.Driver, existingDSN, *svc.Connection)
+	dsn, err := connector.BuildDSN(svc.Driver, params)
+	if err != nil {
+		return fmt.Errorf("Invalid connection details: %w", err)
+	}
+	svc.DSN = dsn
+	return nil
+}
+
+// probeTimeout bounds how long "Test connection" waits on a database.
+const probeTimeout = 15 * time.Second
+
+// ProbeConnection tries connection settings without saving them, so the
+// admin UI can confirm credentials before a service is created or edited.
+// The body is the same shape as CreateService. When "name" refers to an
+// existing service and no password is given, the stored password is used.
+// POST /api/v1/system/connection/test
+func (h *SystemHandler) ProbeConnection(w http.ResponseWriter, r *http.Request) {
+	var svc model.ServiceConfig
+	if err := readJSON(r, &svc); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	if svc.Driver == "" {
+		writeError(w, http.StatusBadRequest, "Driver is required")
+		return
+	}
+
+	existingDSN := ""
+	if svc.Name != "" {
+		if existing, err := h.store.GetServiceByName(r.Context(), svc.Name); err == nil {
+			existingDSN = existing.DSN
+			if svc.PrivateKeyPath == "" {
+				svc.PrivateKeyPath = existing.PrivateKeyPath
+			}
+		}
+	}
+	if err := resolveDSN(&svc, existingDSN); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if svc.DSN == "" {
+		writeError(w, http.StatusBadRequest, "Provide connection details or a DSN")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+	defer cancel()
+	start := time.Now()
+	res, err := h.registry.Probe(ctx, connector.ConnectionConfig{
+		Driver:         svc.Driver,
+		DSN:            connector.SanitizeDSN(svc.Driver, svc.DSN),
+		PrivateKeyPath: svc.PrivateKeyPath,
+		SchemaName:     svc.Schema,
+	})
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "Could not connect: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":     true,
+		"message":     "Connection successful",
+		"table_count": len(res.Tables),
+		"tables":      res.Tables,
+		"latency_ms":  time.Since(start).Milliseconds(),
+	})
+}
+
+// Info returns server details the admin UI shows: version and drivers.
+// GET /api/v1/system/info
+func (h *SystemHandler) Info(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"version": h.version(),
+		"drivers": h.registry.Drivers(),
+	})
+}
+
+func (h *SystemHandler) version() string {
+	if h.Version == "" {
+		return "dev"
+	}
+	return h.Version
 }
 
 // TestConnection tests an active service's database connectivity by pinging it.
@@ -895,20 +1002,21 @@ func (h *SystemHandler) MCPInfo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Keep in sync with the tools registered in internal/mcp/tools.go.
 	tools := []map[string]interface{}{
-		{"name": "faucet_list_services", "description": "List all configured database services", "read_only": true},
-		{"name": "faucet_list_tables", "description": "List tables in a service with row counts", "read_only": true},
-		{"name": "faucet_describe_table", "description": "Get detailed schema for a table", "read_only": true},
-		{"name": "faucet_query", "description": "Query records with filtering, ordering, pagination", "read_only": true},
-		{"name": "faucet_insert", "description": "Insert records into a table", "read_only": false},
-		{"name": "faucet_update", "description": "Update records matching a filter", "read_only": false},
-		{"name": "faucet_delete", "description": "Delete records matching a filter", "read_only": false},
-		{"name": "faucet_raw_sql", "description": "Execute raw SQL (if enabled on service)", "read_only": false},
+		{"name": "faucet_list_services", "description": "List the database services the caller's role can access, with driver and access mode", "read_only": true},
+		{"name": "faucet_list_tables", "description": "List tables in a service with approximate row counts and column summaries", "read_only": true},
+		{"name": "faucet_describe_table", "description": "Get a table's columns, types, primary and foreign keys, and indexes", "read_only": true},
+		{"name": "faucet_query", "description": "Query records with filters, field selection, aggregates, grouping, ordering and pagination", "read_only": true},
+		{"name": "faucet_insert", "description": "Insert one or more records into a table", "read_only": false},
+		{"name": "faucet_update", "description": "Update records that match a required filter", "read_only": false},
+		{"name": "faucet_delete", "description": "Delete records that match a required filter", "read_only": false},
+		{"name": "faucet_raw_sql", "description": "Run a raw SQL statement, only on services with raw SQL enabled and never on read-only services", "read_only": false},
 	}
 
 	resources := []map[string]interface{}{
-		{"uri": "faucet://services", "description": "JSON list of all configured services"},
-		{"uri": "faucet://schema/{service}", "description": "Full schema for a database service"},
+		{"uri": "faucet://services", "description": "JSON list of the database services the caller's role can access"},
+		{"uri": "faucet://schema/{service}", "description": "Full schema for a database service: tables, columns, keys and indexes"},
 	}
 
 	// Derive the MCP endpoint URL from the incoming request.
@@ -924,7 +1032,7 @@ func (h *SystemHandler) MCPInfo(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"server_name":    "Faucet Database API",
-		"server_version": "0.1.0",
+		"server_version": h.version(),
 		"mcp_endpoint":   mcpEndpoint,
 		"transports": []map[string]interface{}{
 			{
@@ -964,6 +1072,11 @@ func serviceToMap(svc *model.ServiceConfig) map[string]interface{} {
 	}
 	if svc.PrivateKeyPath != "" {
 		m["private_key_path"] = svc.PrivateKeyPath
+	}
+	// Non-secret connection fields (never the password) for display and
+	// edit forms.
+	if svc.DSN != "" {
+		m["connection"] = connector.DescribeDSN(svc.Driver, svc.DSN)
 	}
 	return m
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
+	"github.com/faucetdb/faucet/internal/connector/sqlite"
 	"github.com/faucetdb/faucet/internal/model"
 	"github.com/faucetdb/faucet/internal/service"
 )
@@ -43,7 +44,9 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(func() { store.Close() })
 
 	authSvc := service.NewAuthService(store, testJWTSecret)
-	sysHandler := NewSystemHandler(store, authSvc, connector.NewRegistry())
+	registry := connector.NewRegistry()
+	registry.RegisterDriver("sqlite", func() connector.Connector { return sqlite.New() })
+	sysHandler := NewSystemHandler(store, authSvc, registry)
 
 	// Mount routes without auth middleware for direct handler testing.
 	r := chi.NewRouter()
@@ -56,6 +59,8 @@ func newTestEnv(t *testing.T) *testEnv {
 		r.Get("/service/{serviceName}", sysHandler.GetService)
 		r.Put("/service/{serviceName}", sysHandler.UpdateService)
 		r.Delete("/service/{serviceName}", sysHandler.DeleteService)
+		r.Post("/connection/test", sysHandler.ProbeConnection)
+		r.Get("/info", sysHandler.Info)
 
 		r.Get("/role", sysHandler.ListRoles)
 		r.Post("/role", sysHandler.CreateRole)

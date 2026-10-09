@@ -20,6 +20,7 @@ import (
 	"github.com/faucetdb/faucet/internal/config"
 	"github.com/faucetdb/faucet/internal/connector"
 	"github.com/faucetdb/faucet/internal/connector/sqlite"
+	fmcp "github.com/faucetdb/faucet/internal/mcp"
 	"github.com/faucetdb/faucet/internal/model"
 	"github.com/faucetdb/faucet/internal/service"
 )
@@ -1192,7 +1193,7 @@ func TestMCPInfo(t *testing.T) {
 	if resp["server_name"] != "Faucet Database API" {
 		t.Errorf("server_name = %v, want Faucet Database API", resp["server_name"])
 	}
-	if resp["server_version"] != "0.1.0" {
+	if resp["server_version"] != "dev" {
 		t.Errorf("server_version = %v, want 0.1.0", resp["server_version"])
 	}
 
@@ -1555,8 +1556,8 @@ func TestMCPEndpoint_E2E_FullProtocolFlow(t *testing.T) {
 	if initResult.ServerInfo.Name != "Faucet Database API" {
 		t.Errorf("ServerInfo.Name = %q, want %q", initResult.ServerInfo.Name, "Faucet Database API")
 	}
-	if initResult.ServerInfo.Version != "0.1.0" {
-		t.Errorf("ServerInfo.Version = %q, want %q", initResult.ServerInfo.Version, "0.1.0")
+	if initResult.ServerInfo.Version != fmcp.Version {
+		t.Errorf("ServerInfo.Version = %q, want %q", initResult.ServerInfo.Version, fmcp.Version)
 	}
 
 	// Step 2: List tools

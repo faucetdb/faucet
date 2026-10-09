@@ -1,7 +1,9 @@
 package connector
 
 import (
+	"context"
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -104,6 +106,15 @@ func (r *Registry) ListServices() []string {
 	return names
 }
 
+// Drivers returns the registered driver names in sorted order.
+func (r *Registry) Drivers() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	d := r.availableDrivers()
+	sort.Strings(d)
+	return d
+}
+
 func (r *Registry) availableDrivers() []string {
 	drivers := make([]string, 0, len(r.factories))
 	for d := range r.factories {
@@ -118,4 +129,57 @@ func (r *Registry) activeServices() []string {
 		names = append(names, n)
 	}
 	return names
+}
+
+// ProbeResult describes a successful trial connection.
+type ProbeResult struct {
+	Tables []string
+}
+
+// Probe opens a throwaway connection with cfg, pings it, lists its tables,
+// and closes it again. Nothing is registered, so it is safe to call with
+// unsaved settings from the admin UI's "Test connection" button.
+func (r *Registry) Probe(ctx context.Context, cfg ConnectionConfig) (*ProbeResult, error) {
+	r.mu.RLock()
+	factory, ok := r.factories[cfg.Driver]
+	available := r.availableDrivers()
+	r.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("unsupported driver: %s (available: %v)", cfg.Driver, available)
+	}
+
+	type outcome struct {
+		res *ProbeResult
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		conn := factory()
+		// Keep the trial pool tiny; it only lives for this probe.
+		cfg.MaxOpenConns, cfg.MaxIdleConns = 1, 1
+		if err := conn.Connect(cfg); err != nil {
+			done <- outcome{err: err}
+			return
+		}
+		defer conn.Disconnect()
+		if err := conn.Ping(ctx); err != nil {
+			done <- outcome{err: err}
+			return
+		}
+		tables, err := conn.GetTableNames(ctx)
+		if err != nil {
+			done <- outcome{err: fmt.Errorf("connected, but listing tables failed: %w", err)}
+			return
+		}
+		done <- outcome{res: &ProbeResult{Tables: tables}}
+	}()
+
+	// Driver Connect calls are not context-aware, so bound them here. A
+	// connect that outlives the deadline finishes and cleans up on its own.
+	select {
+	case o := <-done:
+		return o.res, o.err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("timed out waiting for the database to respond")
+	}
 }

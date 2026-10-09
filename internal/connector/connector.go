@@ -221,18 +221,31 @@ func sanitizeURLDSN(dsn string) string {
 	// Split userinfo into user and password at the FIRST ':'.
 	user := userinfo
 	pass := ""
+	hasPass := false
 	if ci := strings.IndexByte(userinfo, ':'); ci >= 0 {
 		user = userinfo[:ci]
 		pass = userinfo[ci+1:]
+		hasPass = true
 	}
 
-	// Re-encode. url.PathEscape is too aggressive; url.QueryEscape encodes
-	// spaces as '+' which isn't great for passwords. Use a manual approach:
-	// percent-encode only the characters that break URL parsing.
-	encodedUser := url.PathEscape(user)
-	encodedPass := url.PathEscape(pass)
+	// Decode first so credentials that are already percent-encoded (as the
+	// docs recommend) are not encoded twice; "%40" must stay "@", not become
+	// "%2540". Raw values with a stray "%" fail to decode and are kept as-is.
+	// url.Userinfo applies userinfo escaping (it encodes '@', ':' and '/',
+	// and does not turn spaces into '+').
+	info := url.User(unescapeOrRaw(user))
+	if hasPass {
+		info = url.UserPassword(unescapeOrRaw(user), unescapeOrRaw(pass))
+	}
 
-	return scheme + "://" + encodedUser + ":" + encodedPass + "@" + hostpath + query
+	return scheme + "://" + info.String() + "@" + hostpath + query
+}
+
+func unescapeOrRaw(s string) string {
+	if u, err := url.PathUnescape(s); err == nil {
+		return u
+	}
+	return s
 }
 
 // SchemaChange represents a table alteration.

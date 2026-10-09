@@ -1,185 +1,194 @@
-import { useState, useEffect } from 'preact/hooks';
-import { StatusBadge } from '../components/StatusBadge';
+import { useEffect, useState } from 'preact/hooks';
+import { ServiceRecord } from '../components/ConnectionForm';
+import { CodeBlock } from '../components/CodeBlock';
+import { DbLogo } from '../components/DbLogo';
+import { Icon } from '../components/Icon';
+import { ButtonLink, CopyButton, PageHeader, Panel, Skeleton, StatusDot } from '../components/ui';
 import { apiFetch } from '../hooks/useApi';
+import { describeConnection, engineForDriver } from '../lib/drivers';
+import { serverOrigin } from '../lib/format';
+import { useHealth } from '../lib/server';
 
-interface ServiceSummary {
-  name: string;
-  driver: string;
-  active: boolean;
+interface Counts {
+  services: ServiceRecord[];
+  roles: number;
+  keys: { last_used?: string | null }[];
 }
 
 export function Dashboard() {
-  const [services, setServices] = useState<ServiceSummary[]>([]);
-  const [apiKeyCount, setApiKeyCount] = useState(0);
-  const [roleCount, setRoleCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<Counts | null>(null);
+  const { checks } = useHealth(15_000);
 
   useEffect(() => {
-    loadDashboard();
+    (async () => {
+      const [s, r, k] = await Promise.allSettled([
+        apiFetch('/api/v1/system/service'),
+        apiFetch('/api/v1/system/role'),
+        apiFetch('/api/v1/system/api-key'),
+      ]);
+      setData({
+        services: s.status === 'fulfilled' ? s.value.resource || [] : [],
+        roles: r.status === 'fulfilled' ? (r.value.resource || []).length : 0,
+        keys: k.status === 'fulfilled' ? k.value.resource || [] : [],
+      });
+    })();
   }, []);
 
-  async function loadDashboard() {
-    setLoading(true);
-    try {
-      const [servicesRes, keysRes, rolesRes] = await Promise.allSettled([
-        apiFetch('/api/v1/system/service'),
-        apiFetch('/api/v1/system/api-key'),
-        apiFetch('/api/v1/system/role'),
-      ]);
+  const origin = serverOrigin();
+  const first = data?.services[0];
 
-      if (servicesRes.status === 'fulfilled') {
-        setServices(servicesRes.value.resource || []);
-      }
-      if (keysRes.status === 'fulfilled') {
-        setApiKeyCount((keysRes.value.resource || []).length);
-      }
-      if (rolesRes.status === 'fulfilled') {
-        setRoleCount((rolesRes.value.resource || []).length);
-      }
-    } catch {
-      // Dashboard is best-effort
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function StatCard({ label, value, icon, accent }: { label: string; value: string | number; icon: any; accent?: string }) {
-    return (
-      <div class="card group hover:border-border-default transition-colors duration-200">
-        <div class="flex items-start justify-between">
-          <div>
-            <p class="text-sm text-text-secondary mb-1">{label}</p>
-            <p class={`text-2xl font-semibold font-mono ${accent || 'text-text-primary'}`}>{value}</p>
-          </div>
-          <div class="p-2 rounded-lg bg-surface-overlay text-text-muted group-hover:text-brand transition-colors">
-            {icon}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const steps = data
+    ? [
+        {
+          done: data.services.length > 0,
+          title: 'Connect a database',
+          body: 'Host, port, user and password. Faucet builds the API from your schema.',
+          action: <ButtonLink size="sm" variant="primary" href="/services?add=1" icon="plus">Add database</ButtonLink>,
+        },
+        {
+          done: data.roles > 0,
+          title: 'Create a role',
+          body: 'Decide which databases and tables a key can read or write.',
+          action: <ButtonLink size="sm" href="/roles">Create role</ButtonLink>,
+        },
+        {
+          done: data.keys.length > 0,
+          title: 'Create an API key',
+          body: 'Keys carry a role. Apps and AI agents send them in the X-API-Key header.',
+          action: <ButtonLink size="sm" href="/api-keys">Create key</ButtonLink>,
+        },
+        {
+          done: data.keys.some((k) => !!k.last_used),
+          title: 'Make your first request',
+          body: 'Call the REST API with your key, or connect Claude, Cursor or ChatGPT over MCP.',
+          action: (
+            <div class="flex flex-wrap gap-1.5">
+              <ButtonLink size="sm" href={first ? `/api-explorer?service=${encodeURIComponent(first.name)}` : '/api-explorer'}>Open API explorer</ButtonLink>
+              <ButtonLink size="sm" variant="ghost" href="/mcp">Connect an AI agent</ButtonLink>
+            </div>
+          ),
+        },
+      ]
+    : [];
+  const doneCount = steps.filter((s) => s.done).length;
+  const nextIdx = steps.findIndex((s) => !s.done);
 
   return (
-    <div class="space-y-6">
-      {/* Page header */}
-      <div>
-        <h1 class="text-2xl font-semibold text-text-primary">Dashboard</h1>
-        <p class="text-sm text-text-secondary mt-1">Overview of your Faucet instance</p>
-      </div>
+    <div>
+      <PageHeader title="Overview" description="Your databases, their endpoints and what to do next." />
 
-      {/* Stats grid */}
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <StatCard
-          label="Connected Databases"
-          value={services.length}
-          accent="text-brand"
-          icon={
-            <svg class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M3 12v3c0 1.657 3.134 3 7 3s7-1.343 7-3v-3c0 1.657-3.134 3-7 3s-7-1.343-7-3z" />
-              <path d="M3 7v3c0 1.657 3.134 3 7 3s7-1.343 7-3V7c0 1.657-3.134 3-7 3S3 8.657 3 7z" />
-              <path d="M17 5c0 1.657-3.134 3-7 3S3 6.657 3 5s3.134-3 7-3 7 1.343 7 3z" />
-            </svg>
-          }
-        />
-        <StatCard
-          label="API Keys"
-          value={apiKeyCount}
-          icon={
-            <svg class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clip-rule="evenodd" />
-            </svg>
-          }
-        />
-        <StatCard
-          label="Roles"
-          value={roleCount}
-          icon={
-            <svg class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
-            </svg>
-          }
-        />
-      </div>
+      {data === null ? (
+        <div class="flex flex-col gap-3">
+          <Skeleton class="h-40 w-full rounded-[10px]" />
+          <Skeleton class="h-28 w-full rounded-[10px]" />
+        </div>
+      ) : (
+        <div class="flex flex-col gap-6">
+          {nextIdx !== -1 && (
+            <Panel title="Get started" description={`${doneCount} of ${steps.length} done`}>
+              <ol class="divide-y divide-line">
+                {steps.map((s, i) => {
+                  const isNext = i === nextIdx;
+                  return (
+                    <li key={s.title} class={`flex flex-wrap items-start gap-x-4 gap-y-2 px-5 py-4 ${s.done ? '' : isNext ? '' : 'opacity-70'}`}>
+                      <span
+                        class={`mt-0.5 inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold shrink-0 ${
+                          s.done ? 'bg-ok/15 text-ok' : isNext ? 'bg-brand text-white' : 'border border-line-strong text-fg-faint'
+                        }`}
+                        aria-label={s.done ? 'Done' : `Step ${i + 1}`}
+                      >
+                        {s.done ? <Icon name="check" size={13} /> : i + 1}
+                      </span>
+                      <div class="flex-1 min-w-[220px]">
+                        <p class={`text-base font-medium ${s.done ? 'text-fg-muted line-through decoration-fg-faint' : 'text-fg'}`}>{s.title}</p>
+                        {!s.done && <p class="text-sm text-fg-muted mt-0.5">{s.body}</p>}
+                      </div>
+                      {!s.done && isNext && <div class="shrink-0">{s.action}</div>}
+                    </li>
+                  );
+                })}
+              </ol>
+            </Panel>
+          )}
 
-      {/* Services status + Quick actions */}
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Connected services */}
-        <div class="lg:col-span-2 card">
-          <div class="flex items-center justify-between mb-4">
-            <h2 class="text-base font-semibold text-text-primary">Connected Databases</h2>
-            <a href="/services" class="text-xs text-brand hover:text-brand-light transition-colors">
-              View all &rarr;
-            </a>
-          </div>
-          {loading ? (
-            <div class="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} class="h-14 bg-surface-overlay rounded-lg animate-pulse" />
-              ))}
-            </div>
-          ) : services.length === 0 ? (
-            <div class="text-center py-8">
-              <div class="text-text-muted mb-3">
-                <svg class="w-10 h-10 mx-auto" viewBox="0 0 20 20" fill="currentColor" opacity="0.3">
-                  <path d="M3 12v3c0 1.657 3.134 3 7 3s7-1.343 7-3v-3c0 1.657-3.134 3-7 3s-7-1.343-7-3z" />
-                  <path d="M3 7v3c0 1.657 3.134 3 7 3s7-1.343 7-3V7c0 1.657-3.134 3-7 3S3 8.657 3 7z" />
-                  <path d="M17 5c0 1.657-3.134 3-7 3S3 6.657 3 5s3.134-3 7-3 7 1.343 7 3z" />
-                </svg>
-              </div>
-              <p class="text-sm text-text-muted mb-3">No services connected yet</p>
-              <a href="/services" class="btn-primary text-sm inline-block">Add Service</a>
-            </div>
-          ) : (
-            <div class="space-y-2">
-              {services.map((svc) => (
-                <div
-                  key={svc.name}
-                  class="flex items-center justify-between p-3 rounded-lg bg-surface hover:bg-surface-overlay transition-colors"
-                >
-                  <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 rounded-lg bg-brand/10 flex items-center justify-center">
-                      <span class="text-xs font-bold text-brand uppercase">{svc.driver.slice(0, 2)}</span>
-                    </div>
-                    <div>
-                      <p class="text-sm font-medium text-text-primary">{svc.name}</p>
-                      <p class="text-xs text-text-muted">{svc.driver}</p>
-                    </div>
+          <div class="grid gap-6 lg:grid-cols-[1fr_360px] items-start">
+            <Panel
+              class="min-w-0"
+              title="Databases"
+              actions={data.services.length > 0 ? <ButtonLink size="sm" variant="ghost" href="/services">Manage</ButtonLink> : undefined}
+            >
+              {data.services.length === 0 ? (
+                <p class="px-5 py-6 text-sm text-fg-muted">
+                  Nothing connected yet. <a href="/services?add=1" class="link">Add a database</a> to get an API.
+                </p>
+              ) : (
+                <ul class="divide-y divide-line">
+                  {data.services.map((svc) => {
+                    const check = checks[svc.name];
+                    return (
+                      <li key={svc.name} class="flex items-center gap-3 px-5 py-3">
+                        <DbLogo driver={svc.driver} size={28} />
+                        <div class="min-w-0 flex-1">
+                          <a href={`/schema?service=${encodeURIComponent(svc.name)}`} class="text-sm font-medium font-mono text-fg hover:underline">{svc.name}</a>
+                          <p class="text-xs text-fg-muted truncate">
+                            {engineForDriver(svc.driver).label}
+                            {describeConnection(svc.driver, svc.connection) && ` on ${describeConnection(svc.driver, svc.connection)}`}
+                          </p>
+                        </div>
+                        {!svc.is_active ? (
+                          <StatusDot status="idle" label="Paused" />
+                        ) : check === 'ok' ? (
+                          <StatusDot status="ok" label="Connected" />
+                        ) : check ? (
+                          <StatusDot status="bad" label="Unreachable" />
+                        ) : (
+                          <StatusDot status="warn" label="Not connected" />
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </Panel>
+
+            <Panel class="min-w-0" title="Endpoints" description="Base URLs for apps and AI tools.">
+              <dl class="divide-y divide-line">
+                {[
+                  { label: 'REST API', value: `${origin}/api/v1/${first?.name || '{database}'}` },
+                  { label: 'MCP server', value: `${origin}/mcp` },
+                  { label: 'OpenAPI spec', value: `${origin}/openapi.json` },
+                ].map((e) => (
+                  <div key={e.label} class="px-5 py-3">
+                    <dt class="text-xs text-fg-muted">{e.label}</dt>
+                    <dd class="flex items-center gap-1 mt-0.5">
+                      <code class="flex-1 min-w-0 truncate text-[12.5px] text-fg" title={e.value}>{e.value}</code>
+                      <CopyButton text={e.value} label="Copy" />
+                    </dd>
                   </div>
-                  <StatusBadge status={svc.active ? 'active' : 'inactive'} />
-                </div>
-              ))}
-            </div>
+                ))}
+              </dl>
+            </Panel>
+          </div>
+
+          {first && (
+            <Panel title="Try it from a terminal" description={`Lists the tables in ${first.name}. Replace YOUR_API_KEY with a key from the API keys page.`} bodyClass="p-4">
+              <CodeBlock
+                samples={[
+                  { label: 'curl', code: `curl ${origin}/api/v1/${first.name}/_table \\\n  -H "X-API-Key: YOUR_API_KEY"` },
+                  {
+                    label: 'JavaScript',
+                    code: `const res = await fetch("${origin}/api/v1/${first.name}/_table", {\n  headers: { "X-API-Key": process.env.FAUCET_API_KEY },\n});\nconsole.log(await res.json());`,
+                  },
+                  {
+                    label: 'Python',
+                    code: `import os, requests\n\nres = requests.get(\n    "${origin}/api/v1/${first.name}/_table",\n    headers={"X-API-Key": os.environ["FAUCET_API_KEY"]},\n)\nprint(res.json())`,
+                  },
+                ]}
+              />
+            </Panel>
           )}
         </div>
-
-        {/* Quick actions */}
-        <div class="card">
-          <h2 class="text-base font-semibold text-text-primary mb-4">Quick Actions</h2>
-          <div class="space-y-2">
-            {[
-              { label: 'Add Database', href: '/services', icon: '+' },
-              { label: 'Explore Schema', href: '/schema', icon: '#' },
-              { label: 'Test API', href: '/api-explorer', icon: '>' },
-              { label: 'Create API Key', href: '/api-keys', icon: '*' },
-              { label: 'Manage Roles', href: '/roles', icon: '@' },
-            ].map((action) => (
-              <a
-                key={action.label}
-                href={action.href}
-                class="flex items-center gap-3 p-3 rounded-lg hover:bg-surface-overlay text-text-secondary hover:text-text-primary transition-colors group"
-              >
-                <span class="w-8 h-8 rounded-lg bg-surface-overlay flex items-center justify-center font-mono text-sm text-text-muted group-hover:text-brand group-hover:bg-brand/10 transition-colors">
-                  {action.icon}
-                </span>
-                <span class="text-sm font-medium">{action.label}</span>
-                <svg class="w-4 h-4 ml-auto text-text-muted group-hover:text-text-secondary transition-colors" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
-                </svg>
-              </a>
-            ))}
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
