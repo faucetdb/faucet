@@ -8,7 +8,7 @@ import { Button, ButtonLink, CopyButton, EmptyState, PageHeader, Panel, Skeleton
 import { apiFetch, errorMessage } from '../hooks/useApi';
 import { EngineId, describeConnection, engineForDriver } from '../lib/drivers';
 import { serverOrigin } from '../lib/format';
-import { useHealth } from '../lib/server';
+import { serviceHealth, useHealth } from '../lib/server';
 
 export function Services() {
   const [services, setServices] = useState<ServiceRecord[] | null>(null);
@@ -39,16 +39,40 @@ export function Services() {
     }
   }
 
+  function setResult(name: string, result?: { ok: boolean; message: string }) {
+    setRowResult((r) => {
+      const { [name]: _, ...rest } = r;
+      return result ? { ...rest, [name]: result } : rest;
+    });
+  }
+
   async function test(name: string) {
     setTesting(name);
     try {
-      await apiFetch(`/api/v1/system/service/${encodeURIComponent(name)}/test`);
-      setRowResult((r) => ({ ...r, [name]: { ok: true, message: 'Connection works' } }));
+      const res = await apiFetch(`/api/v1/system/service/${encodeURIComponent(name)}/test`);
+      setResult(name, { ok: true, message: res.message === 'Connection successful' || !res.message ? 'Connection works' : res.message });
+      load();
       refreshHealth();
     } catch (err) {
-      setRowResult((r) => ({ ...r, [name]: { ok: false, message: errorMessage(err, 'Connection failed') } }));
+      setResult(name, { ok: false, message: errorMessage(err, 'Connection failed') });
     } finally {
       setTesting(null);
+    }
+  }
+
+  /** Close the service's connection pool and open a fresh one. */
+  async function reconnect(name: string) {
+    setTesting(name);
+    try {
+      await apiFetch(`/api/v1/system/service/${encodeURIComponent(name)}/reconnect`, { method: 'POST' });
+      setResult(name, { ok: true, message: 'Reconnected' });
+      toast(`Reconnected ${name}`);
+    } catch (err) {
+      setResult(name, { ok: false, message: errorMessage(err, 'Reconnect failed') });
+    } finally {
+      setTesting(null);
+      load();
+      refreshHealth();
     }
   }
 
@@ -75,11 +99,17 @@ export function Services() {
 
   async function setActive(svc: ServiceRecord, active: boolean) {
     try {
-      await apiFetch(`/api/v1/system/service/${encodeURIComponent(svc.name)}`, {
+      const res = await apiFetch(`/api/v1/system/service/${encodeURIComponent(svc.name)}`, {
         method: 'PUT',
-        body: { is_active: active, read_only: svc.read_only, raw_sql_allowed: svc.raw_sql_allowed },
+        body: { is_active: active },
       });
-      toast(active ? `Resumed ${svc.name}` : `Paused ${svc.name}`);
+      if (res.connection_warning) {
+        setResult(svc.name, { ok: false, message: res.connection_warning });
+        toast(`Resumed ${svc.name}, but it could not connect`, 'bad');
+      } else {
+        setResult(svc.name);
+        toast(active ? `Resumed ${svc.name}. Its API is back online` : `Paused ${svc.name}. Its API and MCP tools are offline`);
+      }
       load();
       refreshHealth();
     } catch (err) {
@@ -102,11 +132,7 @@ export function Services() {
   }
 
   function status(svc: ServiceRecord) {
-    if (!svc.is_active) return <StatusDot status="idle" label="Paused" />;
-    const check = checks[svc.name];
-    if (check === 'ok') return <StatusDot status="ok" label="Connected" />;
-    if (check) return <StatusDot status="bad" label="Unreachable" />;
-    return <StatusDot status="warn" label="Not connected" />;
+    return <StatusDot {...serviceHealth(svc, checks[svc.name])} />;
   }
 
   const addButton = (
@@ -120,7 +146,7 @@ export function Services() {
       <PageHeader
         title="Databases"
         description="Each database you connect gets a REST API and MCP tools for AI agents."
-        actions={services && services.length > 0 ? addButton : undefined}
+        actions={services ? addButton : undefined}
       />
 
       {loadError && <p class="mb-4 text-sm text-bad">Could not load databases: {loadError}</p>}
@@ -152,7 +178,10 @@ export function Services() {
             const engine = engineForDriver(svc.driver);
             const where = describeConnection(svc.driver, svc.connection);
             const endpoint = `${serverOrigin()}/api/v1/${svc.name}`;
-            const result = rowResult[svc.name];
+            const result =
+              rowResult[svc.name] ||
+              (svc.is_active && svc.status === 'error' && svc.connection_error ? { ok: false, message: svc.connection_error } : undefined);
+            const unhealthy = svc.is_active && serviceHealth(svc, checks[svc.name]).status === 'bad';
             return (
               <div key={svc.name} class={`px-5 py-4 ${flash === svc.name ? 'anim-flash' : ''}`}>
                 <div class="flex flex-wrap items-start gap-x-4 gap-y-3">
@@ -176,13 +205,27 @@ export function Services() {
                   <div class="flex flex-wrap items-center gap-1.5">
                     <ButtonLink size="sm" variant="secondary" icon="table" href={`/schema?service=${encodeURIComponent(svc.name)}`}>Browse</ButtonLink>
                     <ButtonLink size="sm" variant="secondary" icon="terminal" href={`/api-explorer?service=${encodeURIComponent(svc.name)}`}>Try API</ButtonLink>
-                    <Button size="sm" variant="ghost" icon="bolt" loading={testing === svc.name} onClick={() => test(svc.name)}>Test</Button>
+                    {!svc.is_active ? (
+                      <Button size="sm" variant="secondary" icon="play" onClick={() => setActive(svc, true)}>Resume</Button>
+                    ) : unhealthy ? (
+                      <Button size="sm" variant="secondary" icon="refresh" loading={testing === svc.name} onClick={() => reconnect(svc.name)}>Reconnect</Button>
+                    ) : (
+                      <Button size="sm" variant="ghost" icon="bolt" loading={testing === svc.name} onClick={() => test(svc.name)}>Test</Button>
+                    )}
                     <Button size="sm" variant="ghost" icon="pencil" onClick={() => setDrawer({ open: true, editing: svc })}>Edit</Button>
                     <RowMenu
                       items={[
-                        svc.is_active
-                          ? { label: 'Pause API', onClick: () => setActive(svc, false) }
-                          : { label: 'Resume API', onClick: () => setActive(svc, true) },
+                        ...(svc.is_active
+                          ? [
+                              unhealthy
+                                ? { label: 'Test connection', onClick: () => test(svc.name) }
+                                : { label: 'Reconnect', onClick: () => reconnect(svc.name) },
+                              { label: 'Pause API', onClick: () => setActive(svc, false) },
+                            ]
+                          : [
+                              { label: 'Test connection', onClick: () => test(svc.name) },
+                              { label: 'Resume API', onClick: () => setActive(svc, true) },
+                            ]),
                         { label: 'Remove', danger: true, onClick: () => remove(svc) },
                       ]}
                     />

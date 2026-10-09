@@ -1106,10 +1106,10 @@ func TestFullWorkflow(t *testing.T) {
 	}
 
 	// Step 5: Use the API key to access a service endpoint.
-	// The request will be authenticated but the service won't be found in the
-	// connector registry, so we expect 404 (not 401).
+	// The request will be authenticated but the service failed to connect,
+	// so we expect 503 (not 401 or 404).
 	rr = env.doAPIKey(t, "GET", "/api/v1/demo/_table", nil, keyResp.Key)
-	assertStatus(t, rr, http.StatusNotFound)
+	assertStatus(t, rr, http.StatusServiceUnavailable)
 
 	// Step 6: Verify the API key cannot access system admin endpoints (403).
 	rr = env.doAPIKey(t, "GET", "/api/v1/system/service", nil, keyResp.Key)
@@ -1117,7 +1117,7 @@ func TestFullWorkflow(t *testing.T) {
 
 	// Step 7: Verify the admin JWT can access service endpoints too.
 	rr = env.doAuth(t, "GET", "/api/v1/demo/_table", nil, token)
-	assertStatus(t, rr, http.StatusNotFound)
+	assertStatus(t, rr, http.StatusServiceUnavailable)
 }
 
 // ---------------------------------------------------------------------------

@@ -37,7 +37,7 @@ func (h *TableHandler) ListTableNames(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -63,7 +63,7 @@ func (h *TableHandler) QueryRecords(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -262,7 +262,7 @@ func (h *TableHandler) CreateRecords(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -469,7 +469,7 @@ func (h *TableHandler) ReplaceRecords(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -611,7 +611,7 @@ func (h *TableHandler) UpdateRecords(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -771,7 +771,7 @@ func (h *TableHandler) DeleteRecords(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 

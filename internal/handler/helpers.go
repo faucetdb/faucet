@@ -2,10 +2,12 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/faucetdb/faucet/internal/connector"
 	"github.com/faucetdb/faucet/internal/model"
 )
 
@@ -173,4 +175,18 @@ func clampInt(val, min, max int) int {
 		return max
 	}
 	return val
+}
+
+// writeServiceError answers a request for a service the registry couldn't
+// return: 503 when it is paused or not connected, 404 when it doesn't exist.
+// Driver errors are not echoed: they can name internal hosts.
+func writeServiceError(w http.ResponseWriter, serviceName string, err error) {
+	switch {
+	case errors.Is(err, connector.ErrServicePaused):
+		writeError(w, http.StatusServiceUnavailable, "Service "+serviceName+" is paused. An admin can resume it on the Databases page.")
+	case errors.Is(err, connector.ErrServiceNotConnected):
+		writeError(w, http.StatusServiceUnavailable, "Service "+serviceName+" is not connected to its database. An admin can check it on the Databases page.")
+	default:
+		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+	}
 }

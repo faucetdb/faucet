@@ -60,6 +60,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		r.Put("/service/{serviceName}", sysHandler.UpdateService)
 		r.Delete("/service/{serviceName}", sysHandler.DeleteService)
 		r.Get("/service/{serviceName}/test", sysHandler.TestConnection)
+		r.Post("/service/{serviceName}/reconnect", sysHandler.ReconnectService)
 		r.Post("/connection/test", sysHandler.ProbeConnection)
 		r.Get("/info", sysHandler.Info)
 

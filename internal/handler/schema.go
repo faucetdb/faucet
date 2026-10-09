@@ -36,7 +36,7 @@ func (h *SchemaHandler) ListTables(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -69,7 +69,7 @@ func (h *SchemaHandler) GetTableSchema(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -103,7 +103,7 @@ func (h *SchemaHandler) CreateTable(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -164,7 +164,7 @@ func (h *SchemaHandler) AlterTable(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -265,7 +265,7 @@ func (h *SchemaHandler) DropTable(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 

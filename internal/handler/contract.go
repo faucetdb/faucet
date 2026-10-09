@@ -33,7 +33,7 @@ func (h *ContractHandler) LockTable(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -59,7 +59,7 @@ func (h *ContractHandler) LockService(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -161,7 +161,7 @@ func (h *ContractHandler) GetContract(w http.ResponseWriter, r *http.Request) {
 	if queryBool(r, "check") {
 		conn, err := h.registry.Get(serviceName)
 		if err != nil {
-			writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+			writeServiceError(w, serviceName, err)
 			return
 		}
 		live, err := conn.IntrospectTable(r.Context(), tableName)
@@ -200,7 +200,7 @@ func (h *ContractHandler) DiffService(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -228,7 +228,7 @@ func (h *ContractHandler) PromoteTable(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 

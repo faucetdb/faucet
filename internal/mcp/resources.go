@@ -124,7 +124,7 @@ func (s *MCPServer) handleSchemaResource(
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
 		// Do not wrap err: the registry error names every connected service.
-		return nil, fmt.Errorf("service %q not found.%s", serviceName, s.serviceHint(ctx))
+		return nil, errors.New(s.serviceUnavailable(ctx, serviceName, err))
 	}
 
 	schema, err := conn.IntrospectSchema(ctx)

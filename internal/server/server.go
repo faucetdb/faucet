@@ -137,6 +137,7 @@ func (s *Server) setupRouter() {
 				r.Put("/service/{serviceName}", sysHandler.UpdateService)
 				r.Delete("/service/{serviceName}", sysHandler.DeleteService)
 				r.Get("/service/{serviceName}/test", sysHandler.TestConnection)
+				r.Post("/service/{serviceName}/reconnect", sysHandler.ReconnectService)
 				r.Post("/connection/test", sysHandler.ProbeConnection)
 				r.Get("/info", sysHandler.Info)
 
@@ -305,6 +306,13 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		} else {
 			checks[name] = "ok"
 		}
+	}
+
+	// Services that failed to connect at all. The driver error is not
+	// included: this endpoint is unauthenticated.
+	for name := range s.registry.Failures() {
+		checks[name] = "error: not connected"
+		status = "degraded"
 	}
 
 	if status != "ok" {

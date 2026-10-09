@@ -69,6 +69,7 @@ func runMCP(transport string, port int) error {
 	}
 	for _, svc := range services {
 		if !svc.IsActive {
+			registry.Pause(svc.Name)
 			continue
 		}
 		cfg := connector.ConnectionConfig{
