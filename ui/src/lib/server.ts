@@ -57,5 +57,22 @@ export function useHealth(intervalMs = 30_000): { health: Health; checks: Record
   return { ...state, refresh: () => setTick((t) => t + 1) };
 }
 
+/**
+ * Status dot for a saved database, from its config and its /readyz check.
+ * /readyz reports "error: not connected" for databases that never
+ * connected, and a ping error for connected ones that stopped answering.
+ */
+export function serviceHealth(
+  svc: { is_active: boolean; status?: string },
+  check: string | undefined,
+): { status: 'ok' | 'warn' | 'bad' | 'idle'; label: string } {
+  if (!svc.is_active || svc.status === 'paused') return { status: 'idle', label: 'Paused' };
+  if (check === 'ok') return { status: 'ok', label: 'Connected' };
+  if (check === 'error: not connected' || svc.status === 'error') return { status: 'bad', label: 'Not connected' };
+  if (check) return { status: 'bad', label: 'Unreachable' };
+  if (svc.status === 'connected') return { status: 'ok', label: 'Connected' };
+  return { status: 'warn', label: 'Not connected' };
+}
+
 export const DOCS_URL = 'https://wiki.faucetdb.ai';
 export const GITHUB_URL = 'https://github.com/faucetdb/faucet';

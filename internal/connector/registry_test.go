@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"database/sql"
 	"fmt"
 	"sort"
@@ -144,7 +145,16 @@ func TestConnectFailure(t *testing.T) {
 	}
 }
 
+// retireNow makes replaced connectors close immediately for the test.
+func retireNow(t *testing.T) {
+	t.Helper()
+	orig := retire
+	retire = func(c Connector) { c.Disconnect() }
+	t.Cleanup(func() { retire = orig })
+}
+
 func TestConnectReplacesExisting(t *testing.T) {
+	retireNow(t)
 	r := NewRegistry()
 	var first *mockConnector
 	r.RegisterDriver("mock", func() Connector {
@@ -232,5 +242,74 @@ func TestListServices(t *testing.T) {
 	}
 	if services[0] != "alpha" || services[1] != "beta" {
 		t.Errorf("expected [alpha beta], got %v", services)
+	}
+}
+
+func TestConnectFailureDropsExistingConnection(t *testing.T) {
+	retireNow(t)
+	r := NewRegistry()
+	var first *mockConnector
+	r.RegisterDriver("mock", func() Connector {
+		mc := &mockConnector{}
+		if first == nil {
+			first = mc
+		}
+		return mc
+	})
+
+	if err := r.Connect("svc", ConnectionConfig{Driver: "mock", DSN: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Connect("svc", ConnectionConfig{Driver: "mock", DSN: "fail"}); err == nil {
+		t.Fatal("expected connect failure")
+	}
+
+	if !first.disconnected {
+		t.Error("old connector should be closed when reconnecting fails")
+	}
+	_, err := r.Get("svc")
+	if !errors.Is(err, ErrServiceNotConnected) {
+		t.Errorf("Get error = %v, want ErrServiceNotConnected", err)
+	}
+	st := r.State("svc")
+	if st.Connected || st.Paused || st.Error == "" {
+		t.Errorf("State = %+v, want failed with an error", st)
+	}
+	if _, ok := r.Failures()["svc"]; !ok {
+		t.Error("Failures() should list svc")
+	}
+
+	// A later successful connect clears the failure.
+	if err := r.Connect("svc", ConnectionConfig{Driver: "mock", DSN: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	if st := r.State("svc"); !st.Connected || st.Error != "" {
+		t.Errorf("State after reconnect = %+v", st)
+	}
+}
+
+func TestPauseAndGetErrors(t *testing.T) {
+	r := NewRegistry()
+	mc := &mockConnector{}
+	r.RegisterDriver("mock", func() Connector { return mc })
+	if err := r.Connect("svc", ConnectionConfig{Driver: "mock", DSN: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+
+	r.Pause("svc")
+	if !mc.disconnected {
+		t.Error("Pause should close the connection")
+	}
+	if _, err := r.Get("svc"); !errors.Is(err, ErrServicePaused) {
+		t.Errorf("Get error = %v, want ErrServicePaused", err)
+	}
+	if st := r.State("svc"); !st.Paused || st.Connected {
+		t.Errorf("State = %+v, want paused", st)
+	}
+
+	// Deleting the service forgets it entirely.
+	_ = r.Disconnect("svc")
+	if _, err := r.Get("svc"); !errors.Is(err, ErrServiceNotFound) {
+		t.Errorf("Get error after Disconnect = %v, want ErrServiceNotFound", err)
 	}
 }

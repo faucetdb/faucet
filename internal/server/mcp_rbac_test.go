@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -405,5 +407,52 @@ func TestMCPEndpoint_E2E_ReadOnlyServiceRefusesWrites(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("users row count = %d after refused writes, want 1", n)
+	}
+}
+
+func TestPausedAndFailedServicesExplainThemselves(t *testing.T) {
+	env := setupMCPRBACEnv(t)
+	ctx := context.Background()
+	fullKey := createRoleWithKey(t, env, "mcp-full", "faucet_mcp_rbac_fullkey_key_0002", []model.RoleAccess{
+		{ServiceName: "*", Component: "*", VerbMask: model.VerbAll},
+	})
+
+	// Pause the service the way the admin API does.
+	svc, err := env.store.GetServiceByName(ctx, mcpRBACService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.IsActive = false
+	if err := env.store.UpdateService(ctx, svc); err != nil {
+		t.Fatal(err)
+	}
+	env.registry.Pause(mcpRBACService)
+
+	rr := env.doAPIKey(t, "GET", "/api/v1/"+mcpRBACService+"/_table", nil, fullKey)
+	assertStatus(t, rr, http.StatusServiceUnavailable)
+	if !strings.Contains(rr.Body.String(), "is paused") {
+		t.Errorf("REST body = %s, want a paused message", rr.Body.String())
+	}
+
+	ts := httptest.NewServer(env.server.Router())
+	t.Cleanup(ts.Close)
+	tctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	c := newMCPAPIKeyClient(t, tctx, ts.URL, fullKey)
+	res, text := callTool(t, tctx, c, "faucet_list_tables", map[string]interface{}{"service": mcpRBACService})
+	if !res.IsError || !strings.Contains(text, "is paused") {
+		t.Errorf("faucet_list_tables on a paused service: IsError=%v text=%q", res.IsError, text)
+	}
+	if strings.Contains(text, "Available services: ["+mcpRBACService+"]") {
+		t.Errorf("hint lists the paused service as available: %s", text)
+	}
+
+	// A service that failed to connect makes /readyz degraded without
+	// exposing the driver error.
+	env.registry.Fail("broken", errors.New("dial tcp 10.0.0.9:5432: connection refused"))
+	rr = env.do(t, "GET", "/readyz", nil, nil)
+	assertStatus(t, rr, http.StatusServiceUnavailable)
+	if !strings.Contains(rr.Body.String(), `"broken":"error: not connected"`) || strings.Contains(rr.Body.String(), "10.0.0.9") {
+		t.Errorf("readyz body = %s", rr.Body.String())
 	}
 }

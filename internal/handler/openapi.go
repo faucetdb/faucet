@@ -117,7 +117,7 @@ func (h *OpenAPIHandler) ServeServiceSpec(w http.ResponseWriter, r *http.Request
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 

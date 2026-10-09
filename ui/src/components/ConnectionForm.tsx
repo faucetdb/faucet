@@ -78,6 +78,10 @@ export interface ServiceRecord {
   private_key_path?: string;
   connection?: ConnectionParams;
   created_at?: string;
+  /** Live state from the server's connection registry. */
+  status?: 'connected' | 'paused' | 'error' | 'disconnected';
+  /** Last connection error, when status is "error". */
+  connection_error?: string;
 }
 
 /** Pre-fill the form from a saved service (never includes the password). */
@@ -223,7 +227,10 @@ export async function probeConnection(f: DbForm, existingName?: string): Promise
 }
 
 export function probeKey(f: DbForm): string {
-  return JSON.stringify(dbFormToRequest(f));
+  // Only connection settings count: renaming the API or toggling read-only
+  // doesn't invalidate a successful test.
+  const { name: _name, read_only: _ro, raw_sql_allowed: _raw, ...conn } = dbFormToRequest(f);
+  return JSON.stringify(conn);
 }
 
 /* -------------------------------------------------------------- Component */

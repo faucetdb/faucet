@@ -196,11 +196,30 @@ func (s *MCPServer) serviceHint(ctx context.Context) string {
 	if err != nil || len(services) == 0 {
 		return ""
 	}
-	names := make([]string, len(services))
-	for i, svc := range services {
-		names[i] = svc.Name
+	names := make([]string, 0, len(services))
+	for _, svc := range services {
+		if svc.IsActive {
+			names = append(names, svc.Name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
 	}
 	return " Available services: [" + strings.Join(names, " ") + "]"
+}
+
+// serviceUnavailable explains why the registry has no connection for
+// serviceName. The registry error is not echoed: it lists every connected
+// service and can carry driver errors naming internal hosts.
+func (s *MCPServer) serviceUnavailable(ctx context.Context, serviceName string, err error) string {
+	switch {
+	case errors.Is(err, connector.ErrServicePaused):
+		return fmt.Sprintf("Service %q is paused, so its tools are unavailable until an admin resumes it.%s", serviceName, s.serviceHint(ctx))
+	case errors.Is(err, connector.ErrServiceNotConnected):
+		return fmt.Sprintf("Service %q is not connected to its database right now.%s", serviceName, s.serviceHint(ctx))
+	default:
+		return fmt.Sprintf("Service %q not found.%s", serviceName, s.serviceHint(ctx))
+	}
 }
 
 // writableService loads the service configuration for serviceName and

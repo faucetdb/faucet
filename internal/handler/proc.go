@@ -28,7 +28,7 @@ func (h *ProcHandler) ListProcedures(w http.ResponseWriter, r *http.Request) {
 	serviceName := chi.URLParam(r, "serviceName")
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 
@@ -68,7 +68,7 @@ func (h *ProcHandler) CallProcedure(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.registry.Get(serviceName)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Service not found: "+serviceName)
+		writeServiceError(w, serviceName, err)
 		return
 	}
 

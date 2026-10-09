@@ -240,7 +240,7 @@ func (h *SystemHandler) ListServices(w http.ResponseWriter, r *http.Request) {
 
 	resources := make([]map[string]interface{}, 0, len(services))
 	for i := range services {
-		resources = append(resources, serviceToMap(&services[i]))
+		resources = append(resources, h.serviceToMap(&services[i]))
 	}
 
 	writeJSON(w, http.StatusOK, model.ListResponse{
@@ -298,21 +298,12 @@ func (h *SystemHandler) CreateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Connect the service in the live connector registry so it's immediately usable.
-	cfg := connector.ConnectionConfig{
-		Driver:          svc.Driver,
-		DSN:             svc.DSN,
-		PrivateKeyPath:  svc.PrivateKeyPath,
-		SchemaName:      svc.Schema,
-		MaxOpenConns:    svc.Pool.MaxOpenConns,
-		MaxIdleConns:    svc.Pool.MaxIdleConns,
-		ConnMaxLifetime: svc.Pool.ConnMaxLifetime,
-		ConnMaxIdleTime: svc.Pool.ConnMaxIdleTime,
-	}
-	resp := serviceToMap(&svc)
-	if err := h.registry.Connect(svc.Name, cfg); err != nil {
-		// Service is persisted but connection failed — report it but don't fail the create.
-		resp["connection_warning"] = "Service saved but connection failed: " + err.Error()
+	// Connect the service in the live connector registry so it's immediately
+	// usable. A failed connection is reported but doesn't fail the create.
+	connErr := h.connectService(&svc)
+	resp := h.serviceToMap(&svc)
+	if connErr != nil {
+		resp["connection_warning"] = "Service saved but connection failed: " + connErr.Error()
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -333,7 +324,7 @@ func (h *SystemHandler) GetService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, serviceToMap(svc))
+	writeJSON(w, http.StatusOK, h.serviceToMap(svc))
 }
 
 // UpdateService modifies an existing service configuration.
@@ -383,37 +374,36 @@ func (h *SystemHandler) UpdateService(w http.ResponseWriter, r *http.Request) {
 	if updates.Schema != "" || present["schema"] {
 		existing.Schema = updates.Schema
 	}
-	existing.ReadOnly = updates.ReadOnly
-	existing.RawSQL = updates.RawSQL
-	existing.IsActive = updates.IsActive
+	// Flags change only when sent, so a partial update (e.g. just a label)
+	// doesn't pause the service or clear read_only.
+	if present["read_only"] {
+		existing.ReadOnly = updates.ReadOnly
+	}
+	if present["raw_sql_allowed"] {
+		existing.RawSQL = updates.RawSQL
+	}
+	if present["is_active"] {
+		existing.IsActive = updates.IsActive
+	}
 
 	if err := h.store.UpdateService(r.Context(), existing); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update service: "+err.Error())
 		return
 	}
 
-	resp := serviceToMap(existing)
-
-	// Reconnect the service in the registry with updated config.
+	// Reconnect the service in the registry with the updated config, or take
+	// it offline when paused.
+	var connErr error
 	if existing.IsActive {
-		cfg := connector.ConnectionConfig{
-			Driver:          existing.Driver,
-			DSN:             existing.DSN,
-			PrivateKeyPath:  existing.PrivateKeyPath,
-			SchemaName:      existing.Schema,
-			MaxOpenConns:    existing.Pool.MaxOpenConns,
-			MaxIdleConns:    existing.Pool.MaxIdleConns,
-			ConnMaxLifetime: existing.Pool.ConnMaxLifetime,
-			ConnMaxIdleTime: existing.Pool.ConnMaxIdleTime,
-		}
-		if err := h.registry.Connect(existing.Name, cfg); err != nil {
-			resp["connection_warning"] = "Service updated but reconnection failed: " + err.Error()
-		}
+		connErr = h.connectService(existing)
 	} else {
-		// Service deactivated — disconnect from registry.
-		_ = h.registry.Disconnect(existing.Name)
+		h.registry.Pause(existing.Name)
 	}
 
+	resp := h.serviceToMap(existing)
+	if connErr != nil {
+		resp["connection_warning"] = "Service updated but reconnection failed: " + connErr.Error()
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -538,6 +528,77 @@ func (h *SystemHandler) ProbeConnection(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// serviceConnConfig is the connector config for a stored service.
+func serviceConnConfig(svc *model.ServiceConfig) connector.ConnectionConfig {
+	return connector.ConnectionConfig{
+		Driver:          svc.Driver,
+		DSN:             svc.DSN,
+		PrivateKeyPath:  svc.PrivateKeyPath,
+		SchemaName:      svc.Schema,
+		MaxOpenConns:    svc.Pool.MaxOpenConns,
+		MaxIdleConns:    svc.Pool.MaxIdleConns,
+		ConnMaxLifetime: svc.Pool.ConnMaxLifetime,
+		ConnMaxIdleTime: svc.Pool.ConnMaxIdleTime,
+	}
+}
+
+// checkSQLiteFile refuses a SQLite service whose file doesn't exist.
+func checkSQLiteFile(svc *model.ServiceConfig) error {
+	if svc.Driver != "sqlite" {
+		return nil
+	}
+	return sqliteFileExists(svc.DSN)
+}
+
+// connectService (re)connects a stored service in the live registry. A
+// missing SQLite file is reported as a connection failure instead of being
+// created empty by the driver.
+func (h *SystemHandler) connectService(svc *model.ServiceConfig) error {
+	if err := checkSQLiteFile(svc); err != nil {
+		h.registry.Fail(svc.Name, err)
+		return err
+	}
+	return h.registry.Connect(svc.Name, serviceConnConfig(svc))
+}
+
+// ReconnectService closes a service's connection pool and opens a new one
+// from its stored config, e.g. after the database restarted.
+// POST /api/v1/system/service/{serviceName}/reconnect
+func (h *SystemHandler) ReconnectService(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "serviceName")
+
+	svc, err := h.store.GetServiceByName(r.Context(), name)
+	if err != nil {
+		if errors.Is(err, config.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "Service not found: "+name)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "Failed to get service: "+err.Error())
+		return
+	}
+	if !svc.IsActive {
+		writeError(w, http.StatusConflict, "Service "+name+" is paused. Resume it to reconnect.")
+		return
+	}
+
+	if err := h.connectService(svc); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Reconnect failed: "+err.Error())
+		return
+	}
+	if conn, err := h.registry.Get(name); err == nil {
+		if err := conn.Ping(r.Context()); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "Reconnected, but the database did not respond: "+err.Error())
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Reconnected",
+		"service": h.serviceToMap(svc),
+	})
+}
+
 // sqliteFileExists stops a connection test from silently creating an empty
 // database file: the SQLite driver creates missing files on open.
 func sqliteFileExists(dsn string) error {
@@ -586,20 +647,14 @@ func (h *SystemHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 		// Service exists in store but not in registry — try to reconnect it now.
 		// A paused service is only probed, so testing it doesn't bring its API
 		// back online.
-		cfg := connector.ConnectionConfig{
-			Driver:          svc.Driver,
-			DSN:             svc.DSN,
-			PrivateKeyPath:  svc.PrivateKeyPath,
-			SchemaName:      svc.Schema,
-			MaxOpenConns:    svc.Pool.MaxOpenConns,
-			MaxIdleConns:    svc.Pool.MaxIdleConns,
-			ConnMaxLifetime: svc.Pool.ConnMaxLifetime,
-			ConnMaxIdleTime: svc.Pool.ConnMaxIdleTime,
-		}
 		if !svc.IsActive {
 			ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
 			defer cancel()
-			if _, perr := h.registry.Probe(ctx, cfg); perr != nil {
+			perr := checkSQLiteFile(svc)
+			if perr == nil {
+				_, perr = h.registry.Probe(ctx, serviceConnConfig(svc))
+			}
+			if perr != nil {
 				writeError(w, http.StatusServiceUnavailable, "Connection failed: "+perr.Error())
 				return
 			}
@@ -609,7 +664,7 @@ func (h *SystemHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		if connErr := h.registry.Connect(svc.Name, cfg); connErr != nil {
+		if connErr := h.connectService(svc); connErr != nil {
 			writeError(w, http.StatusServiceUnavailable, "Connection failed: "+connErr.Error())
 			return
 		}
@@ -1107,6 +1162,26 @@ func (h *SystemHandler) MCPInfo(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 // Serialization helpers (avoid exposing sensitive fields like DSN, password)
 // ---------------------------------------------------------------------------
+
+// serviceToMap adds the service's live connection state to its config:
+// "status" is "connected", "paused", "error" (with "connection_error") or
+// "disconnected".
+func (h *SystemHandler) serviceToMap(svc *model.ServiceConfig) map[string]interface{} {
+	m := serviceToMap(svc)
+	st := h.registry.State(svc.Name)
+	switch {
+	case !svc.IsActive:
+		m["status"] = "paused"
+	case st.Connected:
+		m["status"] = "connected"
+	case st.Error != "":
+		m["status"] = "error"
+		m["connection_error"] = st.Error
+	default:
+		m["status"] = "disconnected"
+	}
+	return m
+}
 
 func serviceToMap(svc *model.ServiceConfig) map[string]interface{} {
 	m := map[string]interface{}{

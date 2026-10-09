@@ -221,6 +221,7 @@ func runServe(host string, port int, noUI, dev bool) error {
 	}
 	for _, svc := range services {
 		if !svc.IsActive {
+			registry.Pause(svc.Name)
 			continue
 		}
 		cfg := connector.ConnectionConfig{

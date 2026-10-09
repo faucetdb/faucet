@@ -7,7 +7,7 @@ import { ButtonLink, CopyButton, PageHeader, Panel, Skeleton, StatusDot } from '
 import { apiFetch } from '../hooks/useApi';
 import { describeConnection, engineForDriver } from '../lib/drivers';
 import { serverOrigin } from '../lib/format';
-import { useHealth } from '../lib/server';
+import { serviceHealth, useHealth } from '../lib/server';
 
 interface Counts {
   services: ServiceRecord[];
@@ -135,15 +135,7 @@ export function Dashboard() {
                             {describeConnection(svc.driver, svc.connection) && ` on ${describeConnection(svc.driver, svc.connection)}`}
                           </p>
                         </div>
-                        {!svc.is_active ? (
-                          <StatusDot status="idle" label="Paused" />
-                        ) : check === 'ok' ? (
-                          <StatusDot status="ok" label="Connected" />
-                        ) : check ? (
-                          <StatusDot status="bad" label="Unreachable" />
-                        ) : (
-                          <StatusDot status="warn" label="Not connected" />
-                        )}
+                        <StatusDot {...serviceHealth(svc, check)} />
                       </li>
                     );
                   })}

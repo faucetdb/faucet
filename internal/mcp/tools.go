@@ -305,7 +305,7 @@ func (s *MCPServer) handleListTables(
 
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not found.%s", serviceName, s.serviceHint(ctx))
+		return toolError("%s", s.serviceUnavailable(ctx, serviceName, err))
 	}
 
 	schema, err := conn.IntrospectSchema(ctx)
@@ -386,7 +386,7 @@ func (s *MCPServer) handleDescribeTable(
 
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not found.%s", serviceName, s.serviceHint(ctx))
+		return toolError("%s", s.serviceUnavailable(ctx, serviceName, err))
 	}
 
 	table, err := conn.IntrospectTable(ctx, tableName)
@@ -434,7 +434,7 @@ func (s *MCPServer) handleQuery(
 
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not found.%s", serviceName, s.serviceHint(ctx))
+		return toolError("%s", s.serviceUnavailable(ctx, serviceName, err))
 	}
 
 	// Parse the projection (plain columns and/or aggregates).
@@ -582,7 +582,7 @@ func (s *MCPServer) handleInsert(
 
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not found.%s", serviceName, s.serviceHint(ctx))
+		return toolError("%s", s.serviceUnavailable(ctx, serviceName, err))
 	}
 
 	insertReq := connector.InsertRequest{
@@ -682,7 +682,7 @@ func (s *MCPServer) handleUpdate(
 
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not found.%s", serviceName, s.serviceHint(ctx))
+		return toolError("%s", s.serviceUnavailable(ctx, serviceName, err))
 	}
 
 	// Parse filter with startIndex offset past the SET columns so that
@@ -786,7 +786,7 @@ func (s *MCPServer) handleDelete(
 
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not found.%s", serviceName, s.serviceHint(ctx))
+		return toolError("%s", s.serviceUnavailable(ctx, serviceName, err))
 	}
 
 	// Parse filter.
@@ -868,7 +868,7 @@ func (s *MCPServer) handleRawSQL(
 
 	conn, err := s.registry.Get(serviceName)
 	if err != nil {
-		return toolError("Service %q not connected.%s", serviceName, s.serviceHint(ctx))
+		return toolError("%s", s.serviceUnavailable(ctx, serviceName, err))
 	}
 
 	// Apply timeout.
