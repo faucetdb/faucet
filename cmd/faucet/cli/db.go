@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/faucetdb/faucet/internal/connector"
 	"github.com/faucetdb/faucet/internal/model"
@@ -44,6 +45,7 @@ func newDBAddCmd() *cobra.Command {
 		schema         string
 		privateKeyPath string
 		conn           model.ConnectionParams
+		askPassword    bool
 	)
 
 	cmd := &cobra.Command{
@@ -54,15 +56,27 @@ or omit them to be prompted interactively.
 
 Instead of --dsn you can pass the connection as separate flags (--host,
 --port, --user, --password, --database, ...) and Faucet builds a correctly
-escaped connection string for the driver. MariaDB uses the mysql driver.
+escaped connection string for the driver. Use --password-prompt to type the
+password without it going into your shell history, and --param k=v (repeatable)
+for extra driver options. MariaDB uses the mysql driver.
 
 Supported drivers: postgres, mysql, mssql, oracle, snowflake, sqlite`,
-		Example: `  faucet db add --name mydb --driver postgres --host localhost --user app --password 's3cr3t@!' --database mydb
+		Example: `  faucet db add --name mydb --driver postgres --host localhost --user app --password-prompt --database mydb
+  faucet db add --name mydb --driver postgres --host db.internal --user app --password 's3cr3t@!' --param sslrootcert=/ca.pem
   faucet db add --name shop --driver sqlite --path ./shop.db
   faucet db add --name mydb --driver postgres --dsn "postgres://user:pass@localhost/mydb"
   faucet db add --name analytics --driver snowflake --dsn "USER@org-account/DB/SCHEMA" --private-key-path /path/to/key.p8
   faucet db add  # interactive mode`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if askPassword {
+				fmt.Print("Database password: ")
+				pw, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Println()
+				if err != nil {
+					return fmt.Errorf("read password: %w", err)
+				}
+				conn.Password = string(pw)
+			}
 			if dsn == "" && (conn.Host != "" || conn.Path != "" || conn.Account != "") {
 				if driver == "" {
 					fmt.Print("Driver (postgres, mysql, mssql, oracle, snowflake, sqlite): ")
@@ -97,6 +111,12 @@ Supported drivers: postgres, mysql, mssql, oracle, snowflake, sqlite`,
 	cmd.Flags().StringVar(&conn.Account, "account", "", "Snowflake account identifier (orgname-accountname)")
 	cmd.Flags().StringVar(&conn.Warehouse, "warehouse", "", "Snowflake warehouse")
 	cmd.Flags().StringVar(&conn.Role, "role", "", "Snowflake role")
+	cmd.Flags().BoolVar(&askPassword, "password-prompt", false, "Prompt for the database password without echoing it")
+	cmd.Flags().StringToStringVar(&conn.Options, "param", nil, "Extra connection option as key=value (repeatable), e.g. --param sslrootcert=/ca.pem")
+	cmd.MarkFlagsMutuallyExclusive("dsn", "host")
+	cmd.MarkFlagsMutuallyExclusive("dsn", "path")
+	cmd.MarkFlagsMutuallyExclusive("dsn", "account")
+	cmd.MarkFlagsMutuallyExclusive("password", "password-prompt")
 
 	return cmd
 }
