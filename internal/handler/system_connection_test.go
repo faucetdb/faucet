@@ -3,7 +3,9 @@ package handler
 import (
 	"database/sql"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -77,7 +79,7 @@ func TestUpdateService_ConnectionFieldsKeepStoredPassword(t *testing.T) {
 
 	rr = env.do(t, "PUT", "/api/v1/system/service/pg", toJSON(t, map[string]interface{}{
 		"is_active":  false,
-		"connection": map[string]interface{}{"host": "new", "database": "app", "username": "api"},
+		"connection": map[string]interface{}{"host": "old", "database": "app2", "username": "api"},
 	}))
 	assertStatus(t, rr, http.StatusOK)
 
@@ -85,8 +87,19 @@ func TestUpdateService_ConnectionFieldsKeepStoredPassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if svc.DSN != "postgres://api:secret@new:5432/app" {
+	if svc.DSN != "postgres://api:secret@old:5432/app2" {
 		t.Errorf("stored DSN = %q", svc.DSN)
+	}
+
+	// Moving to another host requires the password again.
+	rr = env.do(t, "PUT", "/api/v1/system/service/pg", toJSON(t, map[string]interface{}{
+		"is_active":  false,
+		"connection": map[string]interface{}{"host": "elsewhere", "database": "app2", "username": "api"},
+	}))
+	assertStatus(t, rr, http.StatusOK)
+	svc, _ = env.store.GetServiceByName(t.Context(), "pg")
+	if strings.Contains(svc.DSN, "secret") {
+		t.Errorf("stored password carried to a new host: %q", svc.DSN)
 	}
 }
 
@@ -131,6 +144,78 @@ func TestProbeConnection_Failure(t *testing.T) {
 		"driver": "db2", "dsn": "x",
 	}))
 	assertStatus(t, rr, http.StatusUnprocessableEntity)
+}
+
+func TestUpdateService_ClearsSchemaAndKeyWhenSentEmpty(t *testing.T) {
+	env := newTestEnv(t)
+	rr := env.do(t, "POST", "/api/v1/system/service", toJSON(t, map[string]interface{}{
+		"name": "sf", "driver": "snowflake", "dsn": "SVC@acct/DB/S?warehouse=WH",
+		"schema": "S", "private_key_path": "/keys/k.p8",
+	}))
+	assertStatus(t, rr, http.StatusCreated)
+
+	// Omitted fields are kept.
+	rr = env.do(t, "PUT", "/api/v1/system/service/sf", toJSON(t, map[string]interface{}{"is_active": false}))
+	assertStatus(t, rr, http.StatusOK)
+	svc, _ := env.store.GetServiceByName(t.Context(), "sf")
+	if svc.Schema != "S" || svc.PrivateKeyPath != "/keys/k.p8" {
+		t.Fatalf("omitted fields changed: %+v", svc)
+	}
+
+	// Explicitly empty fields are cleared.
+	rr = env.do(t, "PUT", "/api/v1/system/service/sf", toJSON(t, map[string]interface{}{
+		"is_active": false, "schema": "", "private_key_path": "",
+	}))
+	assertStatus(t, rr, http.StatusOK)
+	svc, _ = env.store.GetServiceByName(t.Context(), "sf")
+	if svc.Schema != "" || svc.PrivateKeyPath != "" {
+		t.Errorf("fields not cleared: schema=%q key=%q", svc.Schema, svc.PrivateKeyPath)
+	}
+}
+
+func TestProbeConnection_SQLiteMissingFileIsNotCreated(t *testing.T) {
+	env := newTestEnv(t)
+	missing := filepath.Join(t.TempDir(), "nope.db")
+	rr := env.do(t, "POST", "/api/v1/system/connection/test", toJSON(t, map[string]interface{}{
+		"driver": "sqlite", "connection": map[string]interface{}{"path": missing},
+	}))
+	assertStatus(t, rr, http.StatusUnprocessableEntity)
+	if !strings.Contains(rr.Body.String(), "no such file") {
+		t.Errorf("body = %s", rr.Body.String())
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Error("connection test created the database file")
+	}
+}
+
+func TestProbeConnection_EditWithBlankDSNUsesStoredOne(t *testing.T) {
+	env := newTestEnv(t)
+	path := newSQLiteFile(t)
+	rr := env.do(t, "POST", "/api/v1/system/service", toJSON(t, map[string]interface{}{
+		"name": "shop", "driver": "sqlite", "dsn": path, "is_active": true,
+	}))
+	assertStatus(t, rr, http.StatusCreated)
+	rr = env.do(t, "POST", "/api/v1/system/connection/test", toJSON(t, map[string]interface{}{
+		"name": "shop", "driver": "sqlite",
+	}))
+	assertStatus(t, rr, http.StatusOK)
+}
+
+func TestTestConnection_PausedServiceStaysPaused(t *testing.T) {
+	env := newTestEnv(t)
+	path := newSQLiteFile(t)
+	rr := env.do(t, "POST", "/api/v1/system/service", toJSON(t, map[string]interface{}{
+		"name": "shop", "driver": "sqlite", "dsn": path,
+	}))
+	assertStatus(t, rr, http.StatusCreated)
+	rr = env.do(t, "PUT", "/api/v1/system/service/shop", toJSON(t, map[string]interface{}{"is_active": false}))
+	assertStatus(t, rr, http.StatusOK)
+
+	rr = env.do(t, "GET", "/api/v1/system/service/shop/test", nil)
+	assertStatus(t, rr, http.StatusOK)
+	if _, err := env.handler.registry.Get("shop"); err == nil {
+		t.Error("testing a paused service reconnected its API")
+	}
 }
 
 func TestInfo(t *testing.T) {

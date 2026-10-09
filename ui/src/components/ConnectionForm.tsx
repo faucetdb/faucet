@@ -203,7 +203,10 @@ export interface ProbeResult {
 export async function probeConnection(f: DbForm, existingName?: string): Promise<ProbeResult> {
   const body = dbFormToRequest(f);
   const key = JSON.stringify(body);
+  // Only an edit may reuse a saved service's credentials; a new database
+  // that happens to share a saved name must not.
   if (existingName) body.name = existingName;
+  else delete body.name;
   try {
     const res = await apiFetch('/api/v1/system/connection/test', { method: 'POST', body });
     const n = res.table_count ?? 0;

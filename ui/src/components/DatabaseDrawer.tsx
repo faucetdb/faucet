@@ -115,8 +115,11 @@ export function useDatabaseEditor({ open, editing, initialEngine, onSaved }: Dat
       read_only: body.read_only,
       raw_sql_allowed: body.raw_sql_allowed,
     };
-    if (body.schema) out.schema = body.schema;
+    // Send schema whenever it changed, including clearing it.
+    if (form.schema.trim() !== initial.schema.trim()) out.schema = form.schema.trim();
     if (body.private_key_path) out.private_key_path = body.private_key_path;
+    // Switching Snowflake from key pair to password clears the stored key.
+    if (initial.authMethod === 'keypair' && form.authMethod === 'password') out.private_key_path = '';
     if (connChanged) {
       if (body.dsn) out.dsn = body.dsn;
       else out.connection = body.connection;

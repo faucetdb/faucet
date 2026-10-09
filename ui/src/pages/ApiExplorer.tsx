@@ -56,6 +56,7 @@ type Result =
       json: unknown;
       isJson: boolean;
       text: string;
+      customAuth: boolean;
     };
 
 /* ------------------------------------------------------------ URL helpers
@@ -141,7 +142,7 @@ const PARAM_METHODS: Record<string, Method[]> = {
   offset: ['GET'],
   include_count: ['GET'],
   group: ['GET'],
-  filter: ['GET', 'PATCH', 'DELETE'],
+  filter: ['GET', 'PUT', 'PATCH', 'DELETE'],
   ids: ['GET', 'PATCH', 'DELETE'],
   rollback: ['POST', 'PUT', 'PATCH', 'DELETE'],
   continue: ['POST', 'PUT'],
@@ -151,6 +152,78 @@ const PARAM_METHODS: Record<string, Method[]> = {
 function paramsForMethod(url: string, method: Method): string {
   const drop = Object.keys(PARAM_METHODS).filter((p) => !PARAM_METHODS[p].includes(method));
   return removeParams(url, drop);
+}
+
+const AUTH_HEADER_NAMES = new Set(['x-api-key', 'authorization']);
+
+/** Whether the user added their own credential header, which then decides who the request runs as. */
+function hasUserAuthHeader(headers: HeaderRow[]): boolean {
+  return headers.some((h) => AUTH_HEADER_NAMES.has(h.name.trim().toLowerCase()));
+}
+
+/** System endpoints (except sign-in) need an admin session token, not an API key. */
+function isSystemPath(path: string): boolean {
+  return /^\/api\/v1\/system\//.test(path) && !/^\/api\/v1\/system\/admin\/session\/?$/.test(path);
+}
+
+interface DeletePrompt {
+  title: string;
+  body: ComponentChildren;
+  confirmLabel: string;
+}
+
+/** Confirmation wording for a DELETE, matched to what the endpoint removes. */
+function deletePrompt(pathname: string, scope: () => string): DeletePrompt {
+  const path = pathname.replace(/\/+$/, '');
+  const mono = (t: string) => <span class="font-mono text-fg">{t}</span>;
+  let m = path.match(/^\/api\/v1\/([^/]+)\/_table\/([^/]+)$/);
+  if (m && !RESERVED_SEGMENTS.has(m[1])) {
+    const [svc, table] = [safeDecode(m[1]), safeDecode(m[2])];
+    return {
+      title: `Delete rows from ${table}?`,
+      body: <>This permanently deletes {scope()} in {mono(svc)}. It cannot be undone.</>,
+      confirmLabel: 'Delete rows',
+    };
+  }
+  m = path.match(/^\/api\/v1\/([^/]+)\/_schema\/([^/]+)$/);
+  if (m && !RESERVED_SEGMENTS.has(m[1])) {
+    const [svc, table] = [safeDecode(m[1]), safeDecode(m[2])];
+    return {
+      title: `Drop table ${table}?`,
+      body: <>This drops {mono(table)} from {mono(svc)}, with every row in it. It cannot be undone.</>,
+      confirmLabel: 'Drop table',
+    };
+  }
+  m = path.match(/^\/api\/v1\/system\/service\/([^/]+)$/);
+  if (m) {
+    const name = safeDecode(m[1]);
+    return {
+      title: `Remove database connection ${name}?`,
+      body: <>Faucet stops serving {mono(`/api/v1/${name}`)} and its MCP tools, and apps that use it start getting errors. The database itself is not changed.</>,
+      confirmLabel: 'Remove database',
+    };
+  }
+  m = path.match(/^\/api\/v1\/system\/role\/([^/]+)$/);
+  if (m) {
+    return {
+      title: `Delete role ${safeDecode(m[1])}?`,
+      body: 'API keys that use this role lose the access it gave them. It cannot be undone.',
+      confirmLabel: 'Delete role',
+    };
+  }
+  m = path.match(/^\/api\/v1\/system\/api-key\/([^/]+)$/);
+  if (m) {
+    return {
+      title: `Revoke API key ${safeDecode(m[1])}?`,
+      body: 'Apps and agents using this key stop working right away. It cannot be undone.',
+      confirmLabel: 'Revoke key',
+    };
+  }
+  return {
+    title: 'Send this DELETE request?',
+    body: <>{mono(`DELETE ${safeDecode(path)}`)} can permanently remove data or settings.</>,
+    confirmLabel: 'Send DELETE',
+  };
 }
 
 /* ------------------------------------------------------- History storage */
@@ -239,7 +312,11 @@ interface BuiltRequest {
   parsed: unknown;
   bodyIsJson: boolean;
   ndjson: boolean;
+  /** Add `Authorization: Bearer $FAUCET_ADMIN_TOKEN`, read from the environment. */
+  adminToken: boolean;
 }
+
+const ADMIN_TOKEN_ENV = 'FAUCET_ADMIN_TOKEN';
 
 function indentAfterFirst(text: string, pad: string): string {
   return text.split('\n').map((l, i) => (i ? pad + l : l)).join('\n');
@@ -247,6 +324,7 @@ function indentAfterFirst(text: string, pad: string): string {
 
 function curlCode(r: BuiltRequest): string {
   const lines = [`curl${r.method === 'GET' ? '' : ` -X ${r.method}`} ${shellQuote(r.href)}`];
+  if (r.adminToken) lines.push(`-H "Authorization: Bearer $${ADMIN_TOKEN_ENV}"`);
   for (const [k, v] of r.headers) lines.push(`-H ${shellQuote(`${k}: ${v}`)}`);
   if (r.body !== null) lines.push(`${/^\s*[[{]/.test(r.body) ? '-d' : '--data-raw'} ${shellQuote(r.body)}`);
   return lines.join(' \\\n  ');
@@ -255,8 +333,10 @@ function curlCode(r: BuiltRequest): string {
 function jsCode(r: BuiltRequest): string {
   const opts: string[] = [];
   if (r.method !== 'GET') opts.push(`  method: ${JSON.stringify(r.method)},`);
-  if (r.headers.length) {
-    opts.push(`  headers: {\n${r.headers.map(([k, v]) => `    ${JSON.stringify(k)}: ${JSON.stringify(v)},`).join('\n')}\n  },`);
+  const jsHeaders = r.headers.map(([k, v]) => `    ${JSON.stringify(k)}: ${JSON.stringify(v)},`);
+  if (r.adminToken) jsHeaders.unshift('    "Authorization": `Bearer ${process.env.' + ADMIN_TOKEN_ENV + '}`,');
+  if (jsHeaders.length) {
+    opts.push(`  headers: {\n${jsHeaders.join('\n')}\n  },`);
   }
   if (r.body !== null) {
     opts.push(
@@ -294,7 +374,9 @@ function pythonCode(r: BuiltRequest): string {
   const args = [`    ${JSON.stringify(base)},`];
   // requests sets Content-Type itself when json= is used.
   const headers = r.bodyIsJson ? r.headers.filter(([k]) => k.toLowerCase() !== 'content-type') : r.headers;
-  if (headers.length) args.push(`    headers={\n${headers.map(([k, v]) => `        ${JSON.stringify(k)}: ${JSON.stringify(v)},`).join('\n')}\n    },`);
+  const pyHeaders = headers.map(([k, v]) => `        ${JSON.stringify(k)}: ${JSON.stringify(v)},`);
+  if (r.adminToken) pyHeaders.unshift(`        "Authorization": f"Bearer {os.environ['${ADMIN_TOKEN_ENV}']}",`);
+  if (pyHeaders.length) args.push(`    headers={\n${pyHeaders.join('\n')}\n    },`);
   if (params.length) {
     const dup = new Set(params.map(([k]) => k)).size !== params.length;
     args.push(
@@ -305,7 +387,7 @@ function pythonCode(r: BuiltRequest): string {
   }
   if (r.body !== null) args.push(r.bodyIsJson ? `    json=${toPython(r.parsed, '    ')},` : `    data=${JSON.stringify(r.body)},`);
   const read = r.ndjson ? 'print(response.text)' : 'print(response.json())';
-  return `import requests\n\nresponse = requests.${r.method.toLowerCase()}(\n${args.join('\n')}\n)\nprint(response.status_code)\n${read}`;
+  return `${r.adminToken ? 'import os\n' : ''}import requests\n\nresponse = requests.${r.method.toLowerCase()}(\n${args.join('\n')}\n)\nprint(response.status_code)\n${read}`;
 }
 
 /* ------------------------------------------------------- Response helpers */
@@ -329,16 +411,17 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function statusHint(status: number, auth: AuthMode, method: Method): ComponentChildren {
+function statusHint(status: number, auth: AuthMode, method: Method, customAuth: boolean): ComponentChildren {
   switch (status) {
     case 400:
       return 'Faucet could not use part of the request. The message says which part; check the query parameters and the body.';
     case 401:
+      if (customAuth) return 'Faucet did not accept the X-API-Key or Authorization header you added. Check its value, or remove it to send as your admin session.';
       return auth === 'key'
         ? <>Faucet did not accept this API key. Check that you pasted all of it and that it has not been revoked on <a class="text-brand-fg hover:underline" href="/api-keys">API keys</a>.</>
         : 'Your admin session has expired. Sign in again to keep exploring.';
     case 403:
-      return auth === 'key'
+      return auth === 'key' || customAuth
         ? <>The key's role does not allow {method} here. Give the role access on <a class="text-brand-fg hover:underline" href="/roles">Roles</a>, or use a different key.</>
         : 'This database does not accept the request. If it is read-only, only GET requests are allowed.';
     case 404:
@@ -491,17 +574,25 @@ export function ApiExplorer() {
 
   /* ---- Request as the code samples see it */
   const built: BuiltRequest = useMemo(() => {
-    const headers: [string, string][] = [['X-API-Key', auth === 'key' && apiKey.trim() ? apiKey.trim() : 'YOUR_API_KEY']];
-    const sendsBody = hasBody && !bodyCheck.empty;
-    if (sendsBody) headers.push(['Content-Type', 'application/json']);
-    for (const h of extraHeaders) if (h.name.trim()) headers.push([h.name.trim(), h.value]);
     let href = serverOrigin() + (url.trim() || '/');
+    let pathname = splitUrl(url.trim()).path;
     try {
-      href = new URL(url.trim() || '/', serverOrigin()).href;
+      const u = new URL(url.trim() || '/', serverOrigin());
+      href = u.href;
+      pathname = u.pathname;
     } catch {
       // keep the raw text
     }
+    // A credential header the user added replaces the default one.
+    const ownAuth = hasUserAuthHeader(extraHeaders);
+    const adminToken = !ownAuth && isSystemPath(pathname);
+    const headers: [string, string][] = [];
+    if (!ownAuth && !adminToken) headers.push(['X-API-Key', auth === 'key' && apiKey.trim() ? apiKey.trim() : 'YOUR_API_KEY']);
+    const sendsBody = hasBody && !bodyCheck.empty;
+    if (sendsBody) headers.push(['Content-Type', 'application/json']);
+    for (const h of extraHeaders) if (h.name.trim()) headers.push([h.name.trim(), h.value]);
     return {
+      adminToken,
       method,
       href,
       headers,
@@ -609,21 +700,19 @@ export function ApiExplorer() {
       document.getElementById(ids.body)?.focus();
       return;
     }
-    if (method === 'DELETE' && target.records) {
-      const scope = param('filter') ? 'every row that matches the filter' : param('ids') ? `the rows with ids ${param('ids')}` : 'the matching rows';
-      const ok = await confirm({
-        title: `Delete rows from ${target.table}?`,
-        body: <>This permanently deletes {scope} in <span class="font-mono text-fg">{target.service}</span>. It cannot be undone.</>,
-        confirmLabel: 'Delete rows',
-        danger: true,
-      });
+    if (method === 'DELETE') {
+      const scope = () => (param('filter') ? 'every row that matches the filter' : param('ids') ? `the rows with ids ${param('ids')}` : 'the matching rows');
+      const ok = await confirm({ ...deletePrompt(resolved.pathname, scope), danger: true });
       if (!ok) return;
     }
 
     const sendPath = resolved.pathname + resolved.search;
+    // With their own X-API-Key or Authorization header, a 401 is about that
+    // header, not the admin session.
+    const customAuth = hasUserAuthHeader(extraHeaders);
     const headers: Record<string, string> = {};
     if (auth === 'key') headers['X-API-Key'] = apiKey.trim();
-    else {
+    else if (!customAuth) {
       const token = sessionToken();
       if (token) headers['Authorization'] = `Bearer ${token}`;
     }
@@ -673,10 +762,11 @@ export function ApiExplorer() {
         json,
         isJson,
         text,
+        customAuth,
       });
       setResultTab('body');
       remember(method, raw);
-      if (res.status === 401 && auth === 'session' && sessionToken()) {
+      if (res.status === 401 && auth === 'session' && !customAuth && sessionToken()) {
         localStorage.removeItem('faucet_session');
         window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
       }
@@ -823,13 +913,14 @@ export function ApiExplorer() {
                   hint={method === 'GET' ? 'Each field adds a parameter to the path above.' : undefined}
                 />
 
-                {(method === 'GET' || method === 'PATCH' || method === 'DELETE') && (
+                {(method === 'GET' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') && (
                   <Field
                     label="Filter"
                     htmlFor={ids.filter}
-                    optional={method === 'GET'}
+                    optional={method === 'GET' || method === 'PUT'}
                     hint={
                       <>
+                        {method === 'PUT' && 'Used only for records in the body that have no id field. '}
                         Like a SQL WHERE clause; values are always sent as bound parameters.{' '}
                         <a class="text-brand-fg hover:underline" href={`${DOCS_URL}/filter-syntax`} target="_blank" rel="noopener noreferrer">Filter syntax</a>
                       </>
@@ -996,7 +1087,7 @@ export function ApiExplorer() {
                   )}
                   <p class="text-xs text-fg-muted">
                     {method === 'POST' && <>Send one object, an array of objects, or <code class="font-mono">{'{"resource": [...]}'}</code> to insert several rows at once.</>}
-                    {method === 'PUT' && <>Each record replaces the row whose <code class="font-mono">id</code> it carries, so include the <code class="font-mono">id</code> field in every record.</>}
+                    {method === 'PUT' && <>Each record replaces the row whose <code class="font-mono">id</code> it carries. Records without an <code class="font-mono">id</code> update the rows the filter selects.</>}
                     {method === 'PATCH' && <>One object with only the fields to change. It applies to every row the filter or IDs select.</>}
                     {columns === null && target.records ? ' Loading columns for a better example.' : ''}
                   </p>
@@ -1114,7 +1205,9 @@ export function ApiExplorer() {
           <Panel
             title="Copy as code"
             description={
-              auth === 'key' && apiKey.trim()
+              built.adminToken
+                ? <>These endpoints need an admin session token, not an API key. Set <code class="font-mono">{ADMIN_TOKEN_ENV}</code> to the token that signing in with <code class="font-mono">POST /api/v1/system/admin/session</code> returns. Tokens expire, so apps should not rely on them.</>
+                : auth === 'key' && apiKey.trim() && !hasUserAuthHeader(extraHeaders)
                 ? 'Includes the API key you entered. Treat the copied code like a password.'
                 : <>Replace <code class="font-mono">YOUR_API_KEY</code> with a key from <a class="text-brand-fg hover:underline" href="/api-keys">API keys</a>. Admin session tokens expire, so apps should not use them.</>
             }
@@ -1218,7 +1311,7 @@ function ResponsePanel({ result, sending, tab, onTab, auth }: {
 
   const tone = statusTone(result.status);
   const message = errorMessageFrom(result.json);
-  const hint = result.status >= 400 ? statusHint(result.status, auth, result.method) : null;
+  const hint = result.status >= 400 ? statusHint(result.status, auth, result.method, result.customAuth) : null;
   const meta = (result.json as { meta?: { count?: number; total?: number } } | null)?.meta;
   const rows = result.isJson && Array.isArray((result.json as { resource?: unknown })?.resource)
     ? ((result.json as { resource: unknown[] }).resource.length)

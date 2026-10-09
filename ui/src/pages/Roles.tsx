@@ -107,12 +107,45 @@ function databaseWords(service: string): ComponentChildren {
   return <Mono>{service}</Mono>;
 }
 
+const trimComponent = (c: string) => c.trim().replace(/^\/+|\/+$/g, '');
+
+/**
+ * True when a Tables pattern can never match a request. Request components
+ * always start with a collection such as _table or _schema, so a prefix
+ * pattern like "prod_*" (no slash, no leading underscore) matches nothing.
+ * See MatchComponent in internal/rbac/rbac.go.
+ */
+function componentMatchesNothing(component: string): boolean {
+  const comp = trimComponent(component);
+  return !isAll(comp) && !comp.includes('/') && comp.endsWith('*') && !comp.startsWith('_');
+}
+
 /** One rule as a sentence: "Read on shop (all tables)", "Full access on orders in shop". */
 function ruleSentence(r: RoleAccess): ComponentChildren {
   const level = levelWords(r.verb_mask);
-  const comp = r.component.trim().replace(/^\/+|\/+$/g, '');
+  const comp = trimComponent(r.component);
   if (isAll(comp)) {
-    return <>{level} on {databaseWords(r.service_name)} (all tables)</>;
+    // POST/PUT/DELETE on /_schema create, alter and drop tables.
+    const ddl = (r.verb_mask & (POST | PUT | DELETE)) !== 0;
+    return <>{level} on {databaseWords(r.service_name)} (all tables{ddl ? ', including schema changes' : ''})</>;
+  }
+  if (componentMatchesNothing(comp)) {
+    const prefix = comp.slice(0, -1);
+    return (
+      <>
+        Nothing: <Mono>{comp}</Mono> matches no table. For tables starting with <Mono>{prefix}</Mono>, write <Mono>_table/{comp}</Mono>.
+      </>
+    );
+  }
+  if (comp === '_table/*') {
+    return <>{level} on rows of every table in {databaseWords(r.service_name)}, no schema changes</>;
+  }
+  if (comp.startsWith('_table/') && comp.endsWith('*') && !comp.slice(7, -1).includes('/')) {
+    return (
+      <>
+        {level} on rows of tables starting with <Mono>{comp.slice(7, -1)}</Mono> in {databaseWords(r.service_name)}
+      </>
+    );
   }
   const bare = !comp.includes('/') && !comp.includes('*');
   return (
@@ -295,19 +328,41 @@ export function Roles() {
     load();
   }
 
+  // Keys (revoked ones too) stay on record and keep a reference to their
+  // role (api_keys.role_id REFERENCES roles(id)), so the config store
+  // refuses to delete a role that has ever had a key. Offer the
+  // equivalent instead: deactivating refuses every key with the role.
+  async function offerDeactivate(role: Role) {
+    if (!role.is_active) {
+      toast(`${role.name} still has keys on record, so it can't be deleted. It is already inactive, so those keys are refused.`, 'bad');
+      return;
+    }
+    const off = await confirm({
+      title: `${role.name} still has keys`,
+      body: (
+        <>
+          Faucet keeps revoked keys on record and they still point to this role, so it can't be deleted. Deactivate it instead: every key with this role is refused.
+        </>
+      ),
+      confirmLabel: 'Deactivate role',
+      danger: true,
+    });
+    if (!off) return;
+    try {
+      await deactivate(role);
+    } catch (err) {
+      toast(errorMessage(err, 'Could not deactivate the role'), 'bad');
+    }
+  }
+
   async function remove(role: Role) {
-    const counts = keyCounts.get(role.id);
-    const active = counts?.active || 0;
+    if ((keyCounts.get(role.id)?.total || 0) > 0) {
+      await offerDeactivate(role);
+      return;
+    }
     const ok = await confirm({
       title: `Delete ${role.name}?`,
-      body:
-        active > 0 ? (
-          <>
-            {plural(active, 'active key')} {active === 1 ? 'uses' : 'use'} this role. {active === 1 ? 'It stops' : 'They stop'} working right away.
-          </>
-        ) : (
-          'No active keys use this role. This cannot be undone.'
-        ),
+      body: 'No keys use this role. This cannot be undone.',
       confirmLabel: 'Delete role',
       danger: true,
     });
@@ -318,30 +373,9 @@ export function Roles() {
       load();
     } catch (err) {
       const msg = errorMessage(err);
-      // Keys (revoked ones too) keep a reference to their role, so the
-      // config store refuses the delete. Offer the equivalent instead.
-      if (/foreign key/i.test(msg) || (counts && counts.total > 0)) {
-        if (!role.is_active) {
-          toast(`${role.name} still has keys on record, so it can't be deleted. It is already inactive, so those keys are refused.`, 'bad');
-          return;
-        }
-        const off = await confirm({
-          title: `${role.name} still has keys`,
-          body: (
-            <>
-              Faucet keeps revoked keys on record and they still point to this role, so it can't be deleted. Deactivate it instead: every key with this role is refused.
-            </>
-          ),
-          confirmLabel: 'Deactivate role',
-          danger: true,
-        });
-        if (off) {
-          try {
-            await deactivate(role);
-          } catch (e2) {
-            toast(errorMessage(e2, 'Could not deactivate the role'), 'bad');
-          }
-        }
+      // The key list may be stale or may have failed to load.
+      if (/foreign key/i.test(msg)) {
+        await offerDeactivate(role);
         return;
       }
       toast(msg || 'Could not delete the role', 'bad');
@@ -711,7 +745,9 @@ function RuleEditor({ index, rule, services, tables, onChange, onRemove }: {
         ? 'Could not list tables for this database. You can still type a name.'
         : rule.component.trim() === ''
           ? 'Leave empty for all tables, or type a table name.'
-          : rule.component.trim().includes('/') || rule.component.includes('*')
+          : componentMatchesNothing(rule.component)
+            ? `This matches no table. For tables starting with ${rule.component.trim().slice(0, -1)}, write _table/${rule.component.trim()}.`
+            : rule.component.trim().includes('/') || rule.component.includes('*')
             ? 'Pattern. See "How matching works" below.'
             : `Covers the rows and schema of ${rule.component.trim()}.`;
 
@@ -824,15 +860,17 @@ function PatternHelp() {
       <summary class="cursor-pointer select-none text-fg-muted hover:text-fg w-fit">How matching works</summary>
       <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 pl-1">
         <dt><span class="code-chip">*</span> or empty</dt>
-        <dd>Everything: every database, or every table including schema changes.</dd>
+        <dd>Everything: every database, or every table. In Tables this also covers schema changes through /_schema: Read and write can create and alter tables, Full can also drop them.</dd>
         <dt><span class="code-chip">orders</span></dt>
         <dd>The rows and the schema of table orders.</dd>
         <dt><span class="code-chip">_table/orders</span></dt>
         <dd>Only the rows of orders.</dd>
         <dt><span class="code-chip">_table/*</span></dt>
         <dd>Rows of every table and the table list, but no schema changes.</dd>
+        <dt><span class="code-chip">_table/prod_*</span></dt>
+        <dd>Rows of every table whose name starts with prod_.</dd>
         <dt><span class="code-chip">prod_*</span></dt>
-        <dd>Any database or table whose name starts with prod_.</dd>
+        <dd>As a database name pattern, every database whose name starts with prod_. In Tables it matches nothing, so write <span class="code-chip">_table/prod_*</span> for a table prefix.</dd>
       </dl>
       <p class="mt-2">To list a database's tables, a key needs read on all tables or on <span class="code-chip">_table/*</span>.</p>
     </details>
@@ -854,7 +892,7 @@ function Preview({ form }: { form: RoleForm }) {
       <ul class="flex flex-col gap-1 text-sm text-fg-muted">
         {access.map((a, i) => (
           <li key={i} class="flex gap-2">
-            <Icon name={a.verb_mask === 0 ? 'alert' : 'check'} size={14} class={`mt-[3px] shrink-0 ${a.verb_mask === 0 ? 'text-warn' : 'text-ok'}`} />
+            <Icon name={a.verb_mask === 0 || componentMatchesNothing(a.component) ? 'alert' : 'check'} size={14} class={`mt-[3px] shrink-0 ${a.verb_mask === 0 || componentMatchesNothing(a.component) ? 'text-warn' : 'text-ok'}`} />
             <span>{ruleSentence(a)}</span>
           </li>
         ))}

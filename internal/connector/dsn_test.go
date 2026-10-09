@@ -194,12 +194,73 @@ func TestDescribeDSN_NeverReturnsPassword(t *testing.T) {
 
 func TestMergeStoredPassword(t *testing.T) {
 	existing, _ := BuildDSN("mysql", model.ConnectionParams{Host: "db", Username: "u", Password: nastyPassword})
-	merged := MergeStoredPassword("mysql", existing, model.ConnectionParams{Host: "db2", Username: "u"})
-	if merged.Password != nastyPassword || merged.Host != "db2" {
-		t.Errorf("got %+v", merged)
+
+	same := MergeStoredPassword("mysql", existing, model.ConnectionParams{Host: "db", Port: 3306, Username: "u", Database: "other"})
+	if same.Password != nastyPassword {
+		t.Errorf("same endpoint should reuse the stored password: %+v", same)
 	}
-	kept := MergeStoredPassword("mysql", existing, model.ConnectionParams{Password: "new"})
+	kept := MergeStoredPassword("mysql", existing, model.ConnectionParams{Host: "db", Username: "u", Password: "new"})
 	if kept.Password != "new" {
 		t.Errorf("explicit password overwritten: %+v", kept)
+	}
+	// A different host, port or user must never receive the stored password.
+	for _, p := range []model.ConnectionParams{
+		{Host: "attacker.example", Username: "u"},
+		{Host: "db", Port: 3307, Username: "u"},
+		{Host: "db", Username: "root"},
+	} {
+		if got := MergeStoredPassword("mysql", existing, p); got.Password != "" {
+			t.Errorf("stored password leaked to %+v", p)
+		}
+	}
+}
+
+func TestKeepExtraParams(t *testing.T) {
+	cases := []struct {
+		driver, old, rebuilt string
+		want, notWant       []string
+	}{
+		{"postgres", "postgres://u:p@old:5432/app?sslmode=verify-full&sslrootcert=/ca.pem&search_path=s1",
+			"postgres://u:p@new:5432/app?sslmode=require",
+			[]string{"sslrootcert=%2Fca.pem", "search_path=s1", "sslmode=require", "@new:5432"}, []string{"verify-full"}},
+		{"sqlite", "./shop.db?_pragma=foreign_keys(1)&mode=ro", "./other.db",
+			[]string{"./other.db?", "_pragma=foreign_keys%281%29", "mode=ro"}, nil},
+		{"mssql", "sqlserver://u:p@h:1433?database=a&encrypt=true&TrustServerCertificate=true&app+name=x",
+			"sqlserver://u:p@h2:1433?database=b",
+			[]string{"app+name=x", "database=b"}, []string{"TrustServerCertificate", "encrypt=true", "database=a"}},
+		{"postgres", "postgres://u:p@old/app", "postgres://u:p@new/app", []string{"postgres://u:p@new/app"}, []string{"?"}},
+	}
+	for _, c := range cases {
+		got := KeepExtraParams(c.driver, c.old, c.rebuilt)
+		for _, w := range c.want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s: %q missing %q", c.driver, got, w)
+			}
+		}
+		for _, w := range c.notWant {
+			if strings.Contains(got, w) {
+				t.Errorf("%s: %q should not contain %q", c.driver, got, w)
+			}
+		}
+	}
+
+	mysqlOld := "u:p@tcp(old:3306)/app?parseTime=true&timeout=5s&charset=utf8mb4"
+	mysqlNew, _ := BuildDSN("mysql", model.ConnectionParams{Host: "new", Username: "u2", Password: "p2", Database: "app2"})
+	got := KeepExtraParams("mysql", mysqlOld, mysqlNew)
+	cfg, err := mysqldriver.ParseDSN(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Addr != "new:3306" || cfg.User != "u2" || cfg.Passwd != "p2" || cfg.DBName != "app2" || cfg.Timeout.String() != "5s" {
+		t.Errorf("mysql merge: %q -> %+v", got, cfg)
+	}
+}
+
+func TestBuildDSN_RejectsInjectionInUnescapedParts(t *testing.T) {
+	if _, err := BuildDSN("oracle", model.ConnectionParams{Host: "h/x?y=1", Database: "svc"}); err == nil {
+		t.Error("oracle host with path/query accepted")
+	}
+	if _, err := BuildDSN("snowflake", model.ConnectionParams{Account: "acct?authenticator=externalbrowser", Username: "u"}); err == nil {
+		t.Error("snowflake account with query accepted")
 	}
 }

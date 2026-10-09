@@ -64,6 +64,10 @@ Supported drivers: postgres, mysql, mssql, oracle, snowflake, sqlite`,
   faucet db add  # interactive mode`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dsn == "" && (conn.Host != "" || conn.Path != "" || conn.Account != "") {
+				if driver == "" {
+					fmt.Print("Driver (postgres, mysql, mssql, oracle, snowflake, sqlite): ")
+					fmt.Scanln(&driver)
+				}
 				if driver == "snowflake" {
 					conn.Schema = schema
 				}

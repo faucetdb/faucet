@@ -171,7 +171,7 @@ go install github.com/faucetdb/faucet/cmd/faucet@latest
 faucet serve
 ```
 
-Open **http://localhost:8080**. The setup wizard creates your admin account and connects your first database: pick the engine, enter host, port, username and password, click **Test connection**, and save. Every table gets REST endpoints at `/api/v1/<name>/_table/<table>` and MCP tools right away. Then create a role and an API key on the **API keys** page, which hands you a ready-to-run `curl` command and MCP config containing the new key.
+Open **http://localhost:8080**. The setup wizard creates your admin account and connects your first database: pick the engine, enter host, port, username and password, click **Test connection**, and save. Every table gets REST endpoints at `/api/v1/<name>/_table/<table>` and MCP tools right away. Then create a role on the **Roles** page and an API key on the **API keys** page, which hands you a ready-to-run `curl` command and an MCP setup command that already contain the new key.
 
 Prefer the terminal? The same steps with the CLI:
 

@@ -160,6 +160,9 @@ func buildOracleDSN(p model.ConnectionParams) (string, error) {
 	if p.Database == "" {
 		return "", fmt.Errorf("service name is required")
 	}
+	if err := validHostPart("host", strings.TrimSpace(p.Host)); err != nil {
+		return "", err
+	}
 	port := p.Port
 	if port == 0 {
 		port = DefaultPort("oracle")
@@ -189,6 +192,9 @@ func buildSnowflakeDSN(p model.ConnectionParams) (string, error) {
 	account := strings.TrimSpace(p.Account)
 	if account == "" {
 		return "", fmt.Errorf("account identifier is required")
+	}
+	if err := validHostPart("account identifier", account); err != nil {
+		return "", err
 	}
 	if p.Username == "" {
 		return "", fmt.Errorf("username is required")
@@ -234,14 +240,112 @@ func DescribeDSN(driver, dsn string) model.ConnectionParams {
 
 // MergeStoredPassword fills an empty password in p from an existing DSN, so
 // editing a connection without re-typing the password keeps it.
+//
+// The stored password is only reused when the request still points at the
+// same server and user. Otherwise an admin could "test" a saved service
+// against a host they control and capture its credentials.
 func MergeStoredPassword(driver, existingDSN string, p model.ConnectionParams) model.ConnectionParams {
 	if p.Password != "" || existingDSN == "" {
 		return p
 	}
-	if old, err := parseDSN(driver, existingDSN); err == nil {
-		p.Password = old.Password
+	old, err := parseDSN(driver, existingDSN)
+	if err != nil || !sameEndpoint(driver, old, p) {
+		return p
 	}
+	p.Password = old.Password
 	return p
+}
+
+// sameEndpoint reports whether two connections target the same server as the
+// same user.
+func sameEndpoint(driver string, a, b model.ConnectionParams) bool {
+	if driver == "snowflake" {
+		return strings.EqualFold(a.Account, strings.TrimSpace(b.Account)) && a.Username == b.Username
+	}
+	port := func(p int) int {
+		if p == 0 {
+			return DefaultPort(driver)
+		}
+		return p
+	}
+	return strings.EqualFold(a.Host, strings.TrimSpace(b.Host)) && port(a.Port) == port(b.Port) && a.Username == b.Username
+}
+
+// mappedParams are query parameters that the connection fields control.
+// Everything else in a stored DSN is an extra option to carry over on edit.
+var mappedParams = map[string][]string{
+	"postgres":  {"sslmode"},
+	"mssql":     {"database", "encrypt", "TrustServerCertificate"},
+	"oracle":    {"SSL", "ssl"},
+	"snowflake": {"warehouse", "role"},
+}
+
+// KeepExtraParams copies driver options from existingDSN that newDSN (built
+// from connection fields) doesn't set, such as sslrootcert, search_path or
+// SQLite pragmas. Without this, editing only the host of a service would
+// silently drop them.
+func KeepExtraParams(driver, existingDSN, newDSN string) string {
+	if existingDSN == "" {
+		return newDSN
+	}
+	if driver == "mysql" {
+		oldCfg, err1 := mysqldriver.ParseDSN(existingDSN)
+		newCfg, err2 := mysqldriver.ParseDSN(newDSN)
+		if err1 != nil || err2 != nil {
+			return newDSN
+		}
+		oldCfg.User, oldCfg.Passwd = newCfg.User, newCfg.Passwd
+		oldCfg.Net, oldCfg.Addr, oldCfg.DBName = newCfg.Net, newCfg.Addr, newCfg.DBName
+		oldCfg.TLSConfig = newCfg.TLSConfig
+		oldCfg.ParseTime = true
+		for k, v := range newCfg.Params {
+			if oldCfg.Params == nil {
+				oldCfg.Params = map[string]string{}
+			}
+			oldCfg.Params[k] = v
+		}
+		return oldCfg.FormatDSN()
+	}
+
+	_, oldQuery, ok := strings.Cut(existingDSN, "?")
+	if !ok || oldQuery == "" {
+		return newDSN
+	}
+	oldVals, err := url.ParseQuery(oldQuery)
+	if err != nil {
+		return newDSN
+	}
+	base, newQuery, _ := strings.Cut(newDSN, "?")
+	newVals, err := url.ParseQuery(newQuery)
+	if err != nil {
+		return newDSN
+	}
+	skip := map[string]bool{}
+	for _, k := range mappedParams[driver] {
+		skip[k] = true
+	}
+	added := false
+	for k, vs := range oldVals {
+		if skip[k] || newVals.Has(k) || strings.Contains(strings.ToLower(k), "password") {
+			continue
+		}
+		newVals[k] = vs
+		added = true
+	}
+	if !added {
+		return newDSN
+	}
+	return base + "?" + newVals.Encode()
+}
+
+// validHostPart rejects characters that would change the meaning of a
+// connection URL when a builder can't escape them (Oracle host, Snowflake
+// account).
+func validHostPart(field, v string) error {
+	if strings.ContainsAny(v, "/?@#: \t\n") {
+		return fmt.Errorf("%s must be a host name or IP address only, without a scheme, port or path", field)
+	}
+	return nil
 }
 
 func parseDSN(driver, dsn string) (model.ConnectionParams, error) {

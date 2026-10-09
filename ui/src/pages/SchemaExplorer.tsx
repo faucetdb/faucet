@@ -132,8 +132,19 @@ const DRIFT_LABEL: Record<string, string> = {
 };
 
 const PAGE_SIZE = 25;
-/** Columns the record API accepts in ?order= (internal/query/sanitizer.go ValidateIdentifier). */
+/** Identifier shape the record API accepts in ?order= (internal/query/sanitizer.go identifierRegex). */
 const SORTABLE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** SQL keywords the server rejects as identifiers (internal/query/sanitizer.go sqlReservedWords). */
+const SQL_RESERVED_WORDS = new Set([
+  'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'DROP', 'CREATE', 'ALTER', 'TRUNCATE',
+  'EXEC', 'EXECUTE', 'UNION', 'INTO', 'FROM', 'WHERE', 'TABLE', 'DATABASE',
+  'GRANT', 'REVOKE', 'INDEX', 'VIEW', 'PROCEDURE', 'FUNCTION', 'TRIGGER', 'SCHEMA',
+]);
+
+/** Whether ?order= on this column passes the server's ValidateIdentifier. */
+function isSortable(name: string): boolean {
+  return name.length <= 128 && SORTABLE.test(name) && !SQL_RESERVED_WORDS.has(name.toUpperCase());
+}
 
 const enc = encodeURIComponent;
 
@@ -999,7 +1010,7 @@ function DataView({ service, table, endpoint }: { service: string; table: TableS
 
   // A single-column primary key gives stable pages when nothing else is sorted.
   const pkCols = table.primary_key?.length ? table.primary_key : (table.columns || []).filter((c) => c.is_primary_key).map((c) => c.name);
-  const defaultOrder = pkCols.length === 1 && SORTABLE.test(pkCols[0]) ? `${pkCols[0]} ASC` : '';
+  const defaultOrder = pkCols.length === 1 && isSortable(pkCols[0]) ? `${pkCols[0]} ASC` : '';
 
   function orderFor(s: Sort | null) {
     return s ? `${s.col} ${s.dir.toUpperCase()}` : defaultOrder;
@@ -1096,7 +1107,7 @@ function DataView({ service, table, endpoint }: { service: string; table: TableS
             <thead class="sticky top-0 bg-panel z-[1]">
               <tr class="border-b border-line text-left">
                 {columnNames.map((name) => {
-                  const sortable = SORTABLE.test(name);
+                  const sortable = isSortable(name);
                   const active = sort?.col === name;
                   return (
                     <th
