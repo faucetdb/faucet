@@ -1,0 +1,34 @@
+name: Docker Hub description
+
+# Keeps the Docker Hub page (hub.docker.com/r/faucetdb/faucet) in sync with
+# DOCKERHUB.md. Runs when DOCKERHUB.md changes on main, or manually.
+# Needs a Docker Hub access token with Read, Write & Delete scope in
+# DOCKERHUB_TOKEN; narrower tokens get "Forbidden".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - DOCKERHUB.md
+      - .github/workflows/dockerhub-description.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Update Docker Hub description
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update Docker Hub description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: faucetdb/faucet
+          readme-filepath: ./DOCKERHUB.md
+          short-description: "REST API + MCP server for Postgres, MySQL, SQL Server, Oracle, Snowflake and SQLite. One binary."
