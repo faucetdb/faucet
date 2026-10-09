@@ -62,16 +62,3 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
-
-      # Keep the Docker Hub page in sync with DOCKERHUB.md. Needs a Docker Hub
-      # access token with Read, Write & Delete scope in DOCKERHUB_TOKEN; with a
-      # narrower token this step fails without failing the release.
-      - name: Update Docker Hub description
-        uses: peter-evans/dockerhub-description@v4
-        continue-on-error: true
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: faucetdb/faucet
-          readme-filepath: ./DOCKERHUB.md
-          short-description: "REST API + MCP server for Postgres, MySQL, SQL Server, Oracle, Snowflake and SQLite. One binary."
