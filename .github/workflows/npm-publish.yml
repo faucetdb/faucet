@@ -88,3 +88,27 @@ jobs:
             export NPM_TOKEN=""
           fi
           ./scripts/npm-publish.sh "$RELEASE_VERSION"
+
+      # List this release in the official MCP Registry (io.github.faucetdb/faucet).
+      # Runs after npm publish because the registry verifies the npm package's
+      # "mcpName" for this exact version, and after the Release workflow pushed
+      # the Docker image whose io.modelcontextprotocol.server.name label it
+      # verifies. Auth is GitHub OIDC (id-token: write above). Do the first
+      # publish by hand (mcp-publisher login github && mcp-publisher publish)
+      # to confirm verification passes. A failure here does not undo npm.
+      - name: Publish to MCP Registry
+        continue-on-error: true
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          MCP_PUBLISHER_VERSION: v1.8.1
+        run: |
+          V="${RELEASE_VERSION#v}"
+          jq --arg v "$V" '
+            .version = $v
+            | (.packages[] | select(.registryType == "npm") | .version) = $v
+            | (.packages[] | select(.registryType == "oci") | .identifier) = ("docker.io/faucetdb/faucet:" + $v)
+          ' server.json > server.tmp && mv server.tmp server.json
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher validate
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
