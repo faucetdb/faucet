@@ -503,6 +503,15 @@ make test       # Runs all tests
 make dev        # Dev mode with hot reload
 ```
 
+## Serving your own SPA and adding cCustom Routes
+
+When building from the source, you can add your custom routes by editing internal/server/custom_routes.go. 
+
+An example is included of how to serve your own single page application (SPA). If you use 
+vite, put it in the frontend directory and configure it with   base: '/_/'. 
+
+Then Faucet will serve ./frontend/dist it under /_ (you can can customize this by editing the code).
+
 ## Tech Stack
 
 - **Go 1.25+** — Chi router, sqlx, Cobra/Viper CLI
