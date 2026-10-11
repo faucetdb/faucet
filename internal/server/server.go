@@ -267,8 +267,8 @@ func (s *Server) setupRouter() {
 			r.Get("/", spaHandler)
 		}
 	}
-
 	s.router = r
+	s.setupCustomRoutes()
 }
 
 // wantsHTML reports whether a request is a browser navigation rather than an
