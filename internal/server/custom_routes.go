@@ -8,7 +8,7 @@ import (
 )
 
 /* This example shows how you can setup a route to serve your custom SPA.
-* You may add other custom routes here. The routes are added after Faucet owns routes.
+* You may add other custom routes here. The routes are added after Faucet own routes.
  */
 
 func (s *Server) setupCustomRoutes() {
