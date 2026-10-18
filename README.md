@@ -19,8 +19,11 @@
   <a href="https://github.com/faucetdb/faucet/blob/main/LICENSE"><img src="https://img.shields.io/github/license/faucetdb/faucet?style=flat-square" alt="License: MIT"></a>
   <a href="https://hub.docker.com/r/faucetdb/faucet"><img src="https://img.shields.io/docker/pulls/faucetdb/faucet?style=flat-square" alt="Docker Pulls"></a>
   <a href="https://github.com/faucetdb/faucet/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/faucetdb/faucet/ci.yml?branch=main&style=flat-square&label=CI" alt="CI Status"></a>
-  <a href="https://goreportcard.com/report/github.com/faucetdb/faucet"><img src="https://goreportcard.com/badge/github.com/faucetdb/faucet?style=flat-square" alt="Go Report Card"></a>
   <a href="https://mcpservers.org/servers/faucetdb/faucet"><img src="https://mcpservers.org/badge.svg" alt="Listed on mcpservers.org"></a>
+</p>
+
+<p align="center">
+  <a href="https://mcpvault.io/servers/faucet/health"><img src="https://mcpvault.io/badge/faucet.svg?theme=dark" alt="MCP Vault"></a>
 </p>
 
 <p align="center">
